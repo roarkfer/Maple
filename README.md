@@ -1,18 +1,17 @@
-# Maple PWA v2
+# Maple PWA v3
 
-Versión autónoma/offline de Maple, independiente de Lovable.
+Versión independiente de Lovable y preparada para funcionar offline.
 
-## Actualización
-Reemplaza en tu repositorio GitHub Pages los archivos actuales por los contenidos de esta carpeta, manteniéndolos en la raíz de `main`.
-
-La clave de almacenamiento sigue siendo `kompakt-lists-v1`, por lo que los datos existentes del mismo origen (`https://roarkfer.github.io/Maple/`) se conservan.
-
-El Service Worker usa `maple-offline-v2`, para forzar la renovación del caché de la versión anterior.
-
-## Incluye
-- Tareas con edición, completar, borrar y reordenar.
-- Hábitos con seguimiento semanal/anual, editar, borrar y reordenar.
-- Carpetas de ejercicios reordenables.
-- Ejercicios reordenables con sets, reps y kg.
+## Qué cambia
+- Mantiene la clave `kompakt-lists-v1`, así que conserva los datos existentes del mismo origen.
+- Hábitos con historial por fecha y vista anual.
+- Ejercicios con casillas individuales por set.
+- Botón para desmarcar todos los sets.
+- Reordenamiento de tareas, hábitos, carpetas y ejercicios.
 - Modo oscuro.
-- Funcionamiento offline.
+- Service Worker actualizado a `maple-offline-v3`.
+- Sin React, TanStack, Tailwind, Lovable ni CDN.
+
+## Actualizar GitHub Pages
+Reemplaza los archivos actuales del repositorio Maple por los archivos de esta carpeta y haz commit.
+No borres los datos de Safari ni desinstales la PWA.
