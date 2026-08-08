@@ -1,17 +1,15 @@
-# Maple PWA v3
+# Maple Offline v4
 
-Versión independiente de Lovable y preparada para funcionar offline.
+Versión autónoma para GitHub Pages/PWA.
 
-## Qué cambia
-- Mantiene la clave `kompakt-lists-v1`, así que conserva los datos existentes del mismo origen.
-- Hábitos con historial por fecha y vista anual.
-- Ejercicios con casillas individuales por set.
-- Botón para desmarcar todos los sets.
-- Reordenamiento de tareas, hábitos, carpetas y ejercicios.
-- Modo oscuro.
-- Service Worker actualizado a `maple-offline-v3`.
-- Sin React, TanStack, Tailwind, Lovable ni CDN.
+- No depende de Lovable.
+- No usa React, TanStack, Tailwind, CDN ni APIs externas en tiempo de ejecución.
+- Funciona offline después de abrirse una vez con internet.
+- Conserva `kompakt-lists-v1` y `maple-dark`, por lo que una actualización sobre el mismo sitio conserva los datos locales.
+- Rutas relativas compatibles con GitHub Pages.
+- Cache nuevo: `maple-offline-v4`.
 
-## Actualizar GitHub Pages
-Reemplaza los archivos actuales del repositorio Maple por los archivos de esta carpeta y haz commit.
-No borres los datos de Safari ni desinstales la PWA.
+## Actualizar
+Reemplaza en la raíz del repositorio los archivos:
+`index.html`, `app.js`, `styles.css`, `manifest.webmanifest`, `sw.js` y `README.md`.
+Luego haz commit y abre Maple una vez con internet para que el nuevo Service Worker se instale.
