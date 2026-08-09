@@ -3,11 +3,12 @@ import { ChevronLeft, Minus, Plus, Search, Type, X } from "lucide-react";
 import { getFile } from "@/lib/idb";
 import { parseEpub, type EpubChapter } from "@/lib/epub";
 import { define } from "@/lib/define";
-import type { BookMeta, FontMeta, ReaderSettings } from "@/lib/library-types";
+import type { BookMeta, DictMeta, FontMeta, ReaderSettings } from "@/lib/library-types";
 
 type Props = {
   book: BookMeta;
   fonts: FontMeta[];
+  dicts: DictMeta[];
   settings: ReaderSettings;
   onSettings: (s: ReaderSettings) => void;
   onProgress: (progress: number) => void;
@@ -17,6 +18,7 @@ type Props = {
 export default function Reader({
   book,
   fonts,
+  dicts,
   settings,
   onSettings,
   onProgress,
@@ -37,6 +39,7 @@ export default function Reader({
   const restored = useRef(false);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const moved = useRef(false);
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     let urls: string[] = [];
@@ -142,21 +145,48 @@ export default function Reader({
     const word = wordAt(x, y);
     if (!word) return;
     setPopup({ x, y, word, def: "Buscando…" });
-    const def = await define(word);
+    const def = await define(word, dicts);
     setPopup({ x, y, word, def: def ?? "Sin definición." });
   };
 
 
   const handlePointerDown = (e: React.PointerEvent) => {
     moved.current = false;
+    swipeStart.current = { x: e.clientX, y: e.clientY };
     const { clientX, clientY } = e;
     pressTimer.current = setTimeout(() => {
       if (!moved.current) void onLongPress(clientX, clientY);
     }, 450);
   };
+
   const cancelPress = () => {
     if (pressTimer.current) clearTimeout(pressTimer.current);
     pressTimer.current = null;
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    const start = swipeStart.current;
+    if (!start) return;
+    if (Math.abs(e.clientX - start.x) > 8 || Math.abs(e.clientY - start.y) > 8) {
+      moved.current = true;
+      cancelPress();
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    cancelPress();
+    const start = swipeStart.current;
+    swipeStart.current = null;
+    if (!start) return;
+
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+
+    // Swipe horizontal: izquierda = página siguiente; derecha = anterior.
+    if (Math.abs(dx) >= 42 && Math.abs(dx) > Math.abs(dy) * 1.25) {
+      turnPage(dx < 0 ? 1 : -1);
+      moved.current = true;
+    }
   };
 
   const turnPage = useCallback((dir: 1 | -1) => {
@@ -191,6 +221,10 @@ export default function Reader({
 
 
   const handleTap = (e: React.MouseEvent) => {
+    if (moved.current) {
+      moved.current = false;
+      return;
+    }
     if (popup) {
       setPopup(null);
       return;
@@ -394,12 +428,14 @@ export default function Reader({
         ref={scrollRef}
         onClick={handleTap}
         onPointerDown={handlePointerDown}
-        onPointerMove={() => {
-          moved.current = true;
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={() => {
+          cancelPress();
+          swipeStart.current = null;
         }}
-        onPointerUp={cancelPress}
-        onPointerCancel={cancelPress}
-        className="flex-1 overflow-hidden"
+        style={{ touchAction: "pan-y" }}
+        className="flex-1 overflow-hidden select-none"
       >
         {error && <p className="px-4 py-6 text-[16px] text-muted-foreground">{error}</p>}
         {!chapters && !error && (

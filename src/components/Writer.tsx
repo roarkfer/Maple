@@ -25,28 +25,15 @@ export default function Writer({ notebook, settings, onChange, onBack }: Props) 
     onChange(text);
     const clean = notebook.name.replace(/[^\\w\\-áéíóúñü ]/gi, "").trim() || "libreta";
     const file = new File([text], `${clean}.txt`, { type: "text/plain;charset=utf-8" });
-
-    const canShare =
-      typeof navigator.share === "function" &&
-      (typeof navigator.canShare !== "function" || navigator.canShare({ files: [file] }));
-
-    if (canShare) {
-      try {
-        await navigator.share({ files: [file], title: file.name });
-        return;
-      } catch (error) {
-        if ((error as DOMException)?.name === "AbortError") return;
-      }
+    if (typeof navigator.share === "function" &&
+        (typeof navigator.canShare !== "function" || navigator.canShare({ files: [file] }))) {
+      try { await navigator.share({ files: [file], title: file.name }); return; }
+      catch (error) { if ((error as DOMException)?.name === "AbortError") return; }
     }
-
     const url = URL.createObjectURL(file);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = file.name;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    const a = document.createElement("a");
+    a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   };
 
   return (
