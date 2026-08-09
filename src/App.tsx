@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import Library, { registerFont } from "@/components/Library";
+import { setUserDicts } from "@/lib/userdict";
 import Reader from "@/components/Reader";
 import Writer from "@/components/Writer";
 import { getFile } from "@/lib/idb";
@@ -293,6 +294,12 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, fontsKey]);
 
+  const dictsKey = store.dicts.map((d) => d.id).join(",");
+  useEffect(() => {
+    setUserDicts(store.dicts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dictsKey]);
+
 
 
 
@@ -451,8 +458,6 @@ export default function App() {
     return (
       <Reader
         book={book}
-        fonts={store.fonts}
-        dicts={store.dicts}
         settings={store.reader}
         onSettings={(reader) => setStore((s) => ({ ...s, reader }))}
         onProgress={(progress) =>
@@ -595,12 +600,12 @@ export default function App() {
       {tab === "read" ? (
         <Library
           books={store.books}
-          fonts={store.fonts}
           dicts={store.dicts}
+          fonts={store.fonts}
           editing={editing}
           onBooks={(books) => setStore((s) => ({ ...s, books }))}
-          onFonts={(fonts) => setStore((s) => ({ ...s, fonts }))}
           onDicts={(dicts) => setStore((s) => ({ ...s, dicts }))}
+          onFonts={(fonts) => setStore((s) => ({ ...s, fonts }))}
           onOpen={(id) => setOpenBook(id)}
         />
       ) : tab === "write" ? (
