@@ -1,7 +1,7 @@
 {
   "name": "Maple",
   "short_name": "Maple",
-  "description": "Tareas, hábitos, ejercicios, biblioteca y escritura.",
+  "description": "Tareas, hábitos, ejercicios, biblioteca, lector y escritura.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
