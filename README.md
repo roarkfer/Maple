@@ -1,21 +1,14 @@
-# Maple Offline v5
+# Maple Offline v5.1
 
-Versión independiente de Lovable de la nueva Maple.
+Correcciones:
+- El lector EPUB cambia de página deslizando horizontalmente.
+- Deslizar a la izquierda = siguiente página; deslizar a la derecha = anterior.
+- Sigue funcionando el toque en tercio izquierdo/derecho y el centro abre el menú.
+- Biblioteca permite **Agregar diccionario StarDict**.
+- Puedes importar un ZIP StarDict o seleccionar juntos `.idx` + `.dict`/`.dict.dz`.
+- Los diccionarios se guardan en IndexedDB y funcionan offline.
+- Mantiene `kompakt-lists-v1`, libros, fuentes, libretas y progreso existentes.
+- Sin Lovable ni APIs externas en tiempo de ejecución.
+- Cache PWA actualizado a `maple-offline-v5-1`.
 
-Incluye tareas, hábitos, ejercicios, biblioteca EPUB, lector, fuentes personalizadas, libretas,
-exportación TXT, modo oscuro y PWA offline.
-
-Mantiene `kompakt-lists-v1`, por lo que al publicarla en el mismo origen de GitHub Pages conserva
-los datos locales existentes. Los EPUB, portadas y fuentes se guardan en IndexedDB (`maple-files`).
-
-No usa Lovable ni APIs externas para el funcionamiento normal. Después de una primera carga para
-instalar el Service Worker, funciona offline.
-
-Nota: el ZIP fuente recibido hace referencia a un DRAE empaquetado, pero no incluyó los binarios
-del diccionario. Para garantizar cero dependencia de internet, el fallback a Wikcionario está
-desactivado en esta build; el lector funciona, pero la definición integrada queda pendiente.
-
-Para publicar:
-1. Sube todo al repositorio Maple.
-2. GitHub: Settings → Pages → Source → GitHub Actions.
-3. Ejecuta el workflow `Build and deploy Maple` o haz push a `main`.
+Para GitHub Pages: sube/reemplaza este proyecto y deja Pages en **GitHub Actions**.

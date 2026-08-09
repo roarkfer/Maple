@@ -1,0 +1,11 @@
+{
+  "name": "Maple",
+  "short_name": "Maple",
+  "description": "Tareas, hábitos, ejercicios, biblioteca, lector y escritura.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff"
+}
