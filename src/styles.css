@@ -3,52 +3,23 @@
 @tailwind utilities;
 
 :root {
-  --radius: 0.625rem;
-  --background: #ffffff;
-  --foreground: #172033;
-  --card: #ffffff;
-  --card-foreground: #172033;
-  --primary: #202939;
-  --primary-foreground: #f8fafc;
-  --secondary: #f3f4f6;
-  --secondary-foreground: #202939;
-  --muted: #f3f4f6;
-  --muted-foreground: #667085;
-  --accent: #f3f4f6;
-  --accent-foreground: #202939;
-  --destructive: #dc2626;
-  --destructive-foreground: #ffffff;
-  --border: #e2e8f0;
-  --input: #e2e8f0;
-  --ring: #94a3b8;
+  --radius: .625rem; --background:#fff; --foreground:#172033; --card:#fff;
+  --card-foreground:#172033; --primary:#202939; --primary-foreground:#f8fafc;
+  --secondary:#f3f4f6; --secondary-foreground:#202939; --muted:#f3f4f6;
+  --muted-foreground:#667085; --accent:#f3f4f6; --accent-foreground:#202939;
+  --destructive:#dc2626; --destructive-foreground:#fff; --border:#e2e8f0;
+  --input:#e2e8f0; --ring:#94a3b8;
 }
-
 .dark {
-  --background: #172033;
-  --foreground: #f8fafc;
-  --card: #202939;
-  --card-foreground: #f8fafc;
-  --primary: #e2e8f0;
-  --primary-foreground: #202939;
-  --secondary: #293241;
-  --secondary-foreground: #f8fafc;
-  --muted: #293241;
-  --muted-foreground: #aab2c0;
-  --accent: #293241;
-  --accent-foreground: #f8fafc;
-  --destructive: #ef4444;
-  --destructive-foreground: #ffffff;
-  --border: rgba(255,255,255,.12);
-  --input: rgba(255,255,255,.16);
-  --ring: #7c8798;
+  --background:#172033; --foreground:#f8fafc; --card:#202939; --card-foreground:#f8fafc;
+  --primary:#e2e8f0; --primary-foreground:#202939; --secondary:#293241;
+  --secondary-foreground:#f8fafc; --muted:#293241; --muted-foreground:#aab2c0;
+  --accent:#293241; --accent-foreground:#f8fafc; --destructive:#ef4444;
+  --destructive-foreground:#fff; --border:rgba(255,255,255,.12);
+  --input:rgba(255,255,255,.16); --ring:#7c8798;
 }
-
-* { border-color: var(--border); }
-html, body, #root { min-height: 100%; }
-body {
-  margin: 0;
-  background: var(--background);
-  color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-weight: 460;
-}
+*{border-color:var(--border)}
+html,body,#root{min-height:100%}
+body{margin:0;background:var(--background);color:var(--foreground);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-weight:460}
+.epub-content img{max-width:100%;height:auto}
+.epub-content p{margin-top:0;margin-bottom:1em}

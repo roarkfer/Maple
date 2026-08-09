@@ -452,6 +452,7 @@ export default function App() {
       <Reader
         book={book}
         fonts={store.fonts}
+        dicts={store.dicts}
         settings={store.reader}
         onSettings={(reader) => setStore((s) => ({ ...s, reader }))}
         onProgress={(progress) =>
@@ -595,9 +596,11 @@ export default function App() {
         <Library
           books={store.books}
           fonts={store.fonts}
+          dicts={store.dicts}
           editing={editing}
           onBooks={(books) => setStore((s) => ({ ...s, books }))}
           onFonts={(fonts) => setStore((s) => ({ ...s, fonts }))}
+          onDicts={(dicts) => setStore((s) => ({ ...s, dicts }))}
           onOpen={(id) => setOpenBook(id)}
         />
       ) : tab === "write" ? (
