@@ -1,7 +1,7 @@
 {
   "name": "Maple",
   "short_name": "Maple",
-  "description": "Tareas, hábitos y ejercicios en una app minimalista.",
+  "description": "Tareas, hábitos, ejercicios, biblioteca y escritura.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
