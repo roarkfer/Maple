@@ -1,14 +1,33 @@
-# Maple Offline v5.1
+# Maple v5.2 Offline
 
-Correcciones:
-- El lector EPUB cambia de página deslizando horizontalmente.
-- Deslizar a la izquierda = siguiente página; deslizar a la derecha = anterior.
-- Sigue funcionando el toque en tercio izquierdo/derecho y el centro abre el menú.
-- Biblioteca permite **Agregar diccionario StarDict**.
-- Puedes importar un ZIP StarDict o seleccionar juntos `.idx` + `.dict`/`.dict.dz`.
-- Los diccionarios se guardan en IndexedDB y funcionan offline.
-- Mantiene `kompakt-lists-v1`, libros, fuentes, libretas y progreso existentes.
-- Sin Lovable ni APIs externas en tiempo de ejecución.
-- Cache PWA actualizado a `maple-offline-v5-1`.
+Versión independiente de Lovable/TanStack Start de la Maple v5.2 definitiva.
 
-Para GitHub Pages: sube/reemplaza este proyecto y deja Pages en **GitHub Actions**.
+## Conserva v5.2
+- Tareas, hábitos y ejercicios.
+- Biblioteca EPUB.
+- Cambio de página por swipe horizontal.
+- Modo página y modo scroll.
+- Botones/teclas de volumen compatibles cuando el navegador/Android los expone como eventos.
+- Diccionarios StarDict agregados por el usuario (`.idx` + `.dict` / `.dict.dz`).
+- Libretas y escritura.
+- Exportación de libretas a TXT local.
+- Modo oscuro.
+- Datos existentes en `kompakt-lists-v1`.
+
+## Offline
+No hay llamadas a Lovable, Wikcionario ni APIs externas durante el uso.
+Los EPUB, portadas, fuentes y diccionarios siguen guardándose en IndexedDB.
+
+Si una Maple anterior ya dejó un DRAE empaquetado en IndexedDB bajo `drae:idx` y `drae:dict`,
+v5.2 lo reutiliza sin descargar nada. Si no existe, usa los diccionarios StarDict que agregues.
+
+El Service Worker usa `maple-offline-v5-2`.
+
+## GitHub Pages
+1. Reemplaza el proyecto de tu repositorio Maple con estos archivos.
+2. Deja **Settings → Pages → Source → GitHub Actions**.
+3. El workflow **Build and deploy Maple v5.2** compila y publica el contenido de `dist`.
+4. Abre Maple una vez con internet tras el deploy para instalar el nuevo Service Worker.
+5. Después prueba en modo avión.
+
+No borres los datos de Safari/PWA si quieres conservar tus datos locales.
