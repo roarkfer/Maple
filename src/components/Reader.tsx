@@ -1,14 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, Minus, Plus, Search, Type, X } from "lucide-react";
 import { getFile } from "@/lib/idb";
 import { parseEpub, type EpubChapter } from "@/lib/epub";
 import { define } from "@/lib/define";
-import type { BookMeta, DictMeta, FontMeta, ReaderSettings } from "@/lib/library-types";
+import type { BookMeta, ReaderSettings } from "@/lib/library-types";
 
 type Props = {
   book: BookMeta;
-  fonts: FontMeta[];
-  dicts: DictMeta[];
   settings: ReaderSettings;
   onSettings: (s: ReaderSettings) => void;
   onProgress: (progress: number) => void;
@@ -17,8 +15,6 @@ type Props = {
 
 export default function Reader({
   book,
-  fonts,
-  dicts,
   settings,
   onSettings,
   onProgress,
@@ -34,12 +30,14 @@ export default function Reader({
   const [popup, setPopup] = useState<{ x: number; y: number; word: string; def: string } | null>(
     null,
   );
+  const scroll = true;
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const restored = useRef(false);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const moved = useRef(false);
-  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+  const start = useRef<{ x: number; y: number } | null>(null);
+  const swiped = useRef(false);
 
   useEffect(() => {
     let urls: string[] = [];
@@ -80,18 +78,24 @@ export default function Reader({
     if (!el) return;
     restored.current = true;
     requestAnimationFrame(() => {
+      if (scroll) {
+        const max = el.scrollHeight - el.clientHeight;
+        el.scrollTop = Math.max(0, max * book.progress);
+        return;
+      }
       const max = el.scrollWidth - el.clientWidth;
       const target = Math.max(0, max * book.progress);
       el.scrollLeft = Math.round(target / el.clientWidth) * el.clientWidth;
     });
-  }, [chapters, book.progress, pageW]);
+  }, [chapters, book.progress, pageW, scroll]);
 
   const saveProgress = useCallback(() => {
     const el = scrollRef.current;
     if (!el || !restored.current) return;
-    const max = el.scrollWidth - el.clientWidth;
-    onProgress(max > 0 ? Math.min(1, Math.max(0, el.scrollLeft / max)) : 0);
-  }, [onProgress]);
+    const max = scroll ? el.scrollHeight - el.clientHeight : el.scrollWidth - el.clientWidth;
+    const pos = scroll ? el.scrollTop : el.scrollLeft;
+    onProgress(max > 0 ? Math.min(1, Math.max(0, pos / max)) : 0);
+  }, [onProgress, scroll]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -145,58 +149,36 @@ export default function Reader({
     const word = wordAt(x, y);
     if (!word) return;
     setPopup({ x, y, word, def: "Buscando…" });
-    const def = await define(word, dicts);
+    const def = await define(word);
     setPopup({ x, y, word, def: def ?? "Sin definición." });
   };
 
 
   const handlePointerDown = (e: React.PointerEvent) => {
     moved.current = false;
-    swipeStart.current = { x: e.clientX, y: e.clientY };
     const { clientX, clientY } = e;
+    start.current = { x: clientX, y: clientY };
     pressTimer.current = setTimeout(() => {
       if (!moved.current) void onLongPress(clientX, clientY);
     }, 450);
   };
-
   const cancelPress = () => {
     if (pressTimer.current) clearTimeout(pressTimer.current);
     pressTimer.current = null;
   };
 
-  const handlePointerMove = (e: React.PointerEvent) => {
-    const start = swipeStart.current;
-    if (!start) return;
-    if (Math.abs(e.clientX - start.x) > 8 || Math.abs(e.clientY - start.y) > 8) {
-      moved.current = true;
-      cancelPress();
-    }
-  };
-
-  const handlePointerUp = (e: React.PointerEvent) => {
-    cancelPress();
-    const start = swipeStart.current;
-    swipeStart.current = null;
-    if (!start) return;
-
-    const dx = e.clientX - start.x;
-    const dy = e.clientY - start.y;
-
-    // Swipe horizontal: izquierda = página siguiente; derecha = anterior.
-    if (Math.abs(dx) >= 42 && Math.abs(dx) > Math.abs(dy) * 1.25) {
-      turnPage(dx < 0 ? 1 : -1);
-      moved.current = true;
-    }
-  };
-
   const turnPage = useCallback((dir: 1 | -1) => {
     const el = scrollRef.current;
     if (!el) return;
+    if (scroll) {
+      el.scrollBy({ top: dir * (el.clientHeight - 48), behavior: "smooth" });
+      return;
+    }
     const step = el.clientWidth;
     const next = Math.round(el.scrollLeft / step) * step + dir * step;
     const max = el.scrollWidth - el.clientWidth;
     el.scrollTo({ left: Math.min(max, Math.max(0, next)), behavior: "smooth" });
-  }, []);
+  }, [scroll]);
 
   // Botones de volumen para pasar página mientras el libro está abierto
   useEffect(() => {
@@ -220,28 +202,32 @@ export default function Reader({
   }, [turnPage]);
 
 
-  const handleTap = (e: React.MouseEvent) => {
-    if (moved.current) {
-      moved.current = false;
+  // Deslizar horizontalmente cambia de página; un toque simple abre el menú.
+  const handlePointerUp = (e: React.PointerEvent) => {
+    cancelPress();
+    const s = start.current;
+    start.current = null;
+    swiped.current = false;
+    if (!s) return;
+    const dx = e.clientX - s.x;
+    const dy = e.clientY - s.y;
+    if (!scroll && Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+      swiped.current = true;
+      turnPage(dx < 0 ? 1 : -1);
+    }
+  };
+
+  const handleTap = () => {
+    if (swiped.current) {
+      swiped.current = false;
       return;
     }
     if (popup) {
       setPopup(null);
       return;
     }
-    const el = scrollRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const relX = (e.clientX - rect.left) / rect.width;
-    // Izquierda: página anterior · Centro: menú · Derecha: página siguiente
-    if (relX < 0.33) {
-      turnPage(-1);
-    } else if (relX > 0.67) {
-      turnPage(1);
-    } else {
-      setMenu((m) => !m);
-      setPanel("none");
-    }
+    setMenu((m) => !m);
+    setPanel("none");
   };
 
   const runSearch = (dir: 1 | -1 = 1) => {
@@ -284,11 +270,7 @@ export default function Reader({
     target?.scrollIntoView({ block: "center" });
   };
 
-  const fontFamily = useMemo(() => {
-    if (settings.fontFamily === "app") return "inherit";
-    const f = fonts.find((x) => x.family === settings.fontFamily);
-    return f ? `"${f.family}", inherit` : "inherit";
-  }, [settings.fontFamily, fonts]);
+  const fontFamily = "inherit";
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background text-foreground">
@@ -386,39 +368,6 @@ export default function Reader({
                   </button>
                 </span>
               </div>
-              <div className="space-y-1">
-                <span className="text-[13px] uppercase tracking-widest text-muted-foreground">
-                  Fuente
-                </span>
-                <div className="flex flex-wrap gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => onSettings({ ...settings, fontFamily: "app" })}
-                    className={`rounded border px-3 py-1 text-[14px] ${
-                      settings.fontFamily === "app"
-                        ? "border-foreground bg-foreground text-background"
-                        : "border-border text-muted-foreground"
-                    }`}
-                  >
-                    Predeterminada
-                  </button>
-                  {fonts.map((f) => (
-                    <button
-                      key={f.id}
-                      type="button"
-                      onClick={() => onSettings({ ...settings, fontFamily: f.family })}
-                      style={{ fontFamily: `"${f.family}"` }}
-                      className={`rounded border px-3 py-1 text-[14px] ${
-                        settings.fontFamily === f.family
-                          ? "border-foreground bg-foreground text-background"
-                          : "border-border text-muted-foreground"
-                      }`}
-                    >
-                      {f.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
           )}
         </div>
@@ -428,14 +377,13 @@ export default function Reader({
         ref={scrollRef}
         onClick={handleTap}
         onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={() => {
-          cancelPress();
-          swipeStart.current = null;
+        onPointerMove={() => {
+          moved.current = true;
         }}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={cancelPress}
         style={{ touchAction: "pan-y" }}
-        className="flex-1 overflow-hidden select-none"
+        className={scroll ? "flex-1 overflow-y-auto overflow-x-hidden" : "flex-1 overflow-hidden"}
       >
         {error && <p className="px-4 py-6 text-[16px] text-muted-foreground">{error}</p>}
         {!chapters && !error && (
@@ -445,7 +393,13 @@ export default function Reader({
           <div
             ref={contentRef}
             className="epub-content"
-            style={{
+            style={scroll ? {
+              padding: "24px 16px",
+              boxSizing: "border-box",
+              fontSize: settings.fontSize,
+              fontFamily,
+              lineHeight: 1.6,
+            } : {
               height: "100%",
               paddingTop: 24,
               paddingBottom: 24,

@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Book, BookOpen, Plus, Trash2, Type } from "lucide-react";
+import { Book, BookOpen, Plus, Trash2 } from "lucide-react";
 import { putFile, getFile, delFile } from "@/lib/idb";
 import { parseEpub } from "@/lib/epub";
 import type { BookMeta, DictMeta, FontMeta } from "@/lib/library-types";
-import { unzipSync } from "fflate";
-import { saveDictionary, removeDictionary } from "@/lib/custom-dict";
 
 function nextId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -24,30 +22,29 @@ export async function registerFont(family: string, id: string) {
 
 type Props = {
   books: BookMeta[];
-  fonts: FontMeta[];
   dicts: DictMeta[];
+  fonts: FontMeta[];
   editing: boolean;
   onBooks: (b: BookMeta[]) => void;
-  onFonts: (f: FontMeta[]) => void;
   onDicts: (d: DictMeta[]) => void;
+  onFonts: (f: FontMeta[]) => void;
   onOpen: (id: string) => void;
 };
 
 export default function Library({
   books,
-  fonts,
   dicts,
+  fonts,
   editing,
   onBooks,
-  onFonts,
   onDicts,
+  onFonts,
   onOpen,
 }: Props) {
   const [menu, setMenu] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [covers, setCovers] = useState<Record<string, string>>({});
   const epubRef = useRef<HTMLInputElement>(null);
-  const fontRef = useRef<HTMLInputElement>(null);
   const dictRef = useRef<HTMLInputElement>(null);
 
   const coverUrls = useRef<Record<string, string>>({});
@@ -116,60 +113,35 @@ export default function Library({
     setBusy(null);
   };
 
-  const addFont = async (file: File) => {
-    const id = nextId();
-    const name = file.name.replace(/\.(ttf|otf|woff2?)$/i, "");
-    const family = `maple-${name.replace(/[^a-z0-9]/gi, "-")}-${id.slice(0, 4)}`;
-    await putFile(`font:${id}`, await file.arrayBuffer());
-    await registerFont(family, id);
-    onFonts([...fonts, { id, name, family }]);
-  };
-
-
-  const addDictionary = async (files: File[]) => {
-    setBusy("Procesando diccionario…");
+  // Un diccionario StarDict son dos archivos: .idx y .dict (o .dict.dz).
+  const addDict = async (files: File[]) => {
+    const idxFile = files.find((f) => /\.idx$/i.test(f.name));
+    const datFile = files.find((f) => /\.dict(\.dz)?$/i.test(f.name));
+    if (!idxFile || !datFile) {
+      setBusy("Selecciona los dos archivos: .idx y .dict (o .dict.dz)");
+      setTimeout(() => setBusy(null), 3500);
+      return;
+    }
+    setBusy("Guardando diccionario…");
     try {
-      let idx: Uint8Array | null = null;
-      let data: Uint8Array | null = null;
-      let dictName = "Diccionario";
-      let gz = false;
-
-      if (files.length === 1 && /\.zip$/i.test(files[0]!.name)) {
-        const archive = unzipSync(new Uint8Array(await files[0]!.arrayBuffer()));
-        const names = Object.keys(archive);
-        const idxName = names.find((n) => /\.idx$/i.test(n));
-        const dictNameInZip = names.find((n) => /\.dict(\.dz)?$/i.test(n));
-        if (idxName) idx = archive[idxName] ?? null;
-        if (dictNameInZip) {
-          data = archive[dictNameInZip] ?? null;
-          gz = /\.dz$/i.test(dictNameInZip);
-          dictName = dictNameInZip.split("/").pop()!.replace(/\.dict(\.dz)?$/i, "");
-        }
-      } else {
-        const idxFile = files.find((f) => /\.idx$/i.test(f.name));
-        const dictFile = files.find((f) => /\.dict(\.dz)?$/i.test(f.name));
-        if (idxFile) idx = new Uint8Array(await idxFile.arrayBuffer());
-        if (dictFile) {
-          data = new Uint8Array(await dictFile.arrayBuffer());
-          gz = /\.dz$/i.test(dictFile.name);
-          dictName = dictFile.name.replace(/\.dict(\.dz)?$/i, "");
-        }
-      }
-
-      if (!idx || !data) {
-        throw new Error("Selecciona un .zip StarDict o los archivos .idx + .dict/.dict.dz juntos");
-      }
-
       const id = nextId();
-      await saveDictionary(id, idx, data);
-      onDicts([...dicts, { id, name: dictName || "Diccionario", gz }]);
-      setBusy("Diccionario agregado");
-      setTimeout(() => setBusy(null), 1500);
-    } catch (e) {
-      setBusy(e instanceof Error ? e.message : "No se pudo agregar el diccionario");
-      setTimeout(() => setBusy(null), 3000);
+      await putFile(`dictidx:${id}`, await idxFile.arrayBuffer());
+      await putFile(`dictdat:${id}`, await datFile.arrayBuffer());
+      onDicts([
+        ...dicts,
+        {
+          id,
+          name: idxFile.name.replace(/\.idx$/i, ""),
+          gz: /\.dz$/i.test(datFile.name),
+        },
+      ]);
+      setBusy(null);
+    } catch {
+      setBusy("No se pudo guardar el diccionario");
+      setTimeout(() => setBusy(null), 2500);
     }
   };
+
 
   return (
     <div className="mt-2 flex-1">
@@ -200,21 +172,11 @@ export default function Library({
               type="button"
               onClick={() => {
                 setMenu(false);
-                fontRef.current?.click();
-              }}
-              className="flex w-full items-center gap-2 px-1 py-2 text-left text-[15px]"
-            >
-              <Type size={16} strokeWidth={1.8} /> Agregar fuente (.ttf)
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMenu(false);
                 dictRef.current?.click();
               }}
               className="flex w-full items-center gap-2 px-1 py-2 text-left text-[15px]"
             >
-              <BookOpen size={16} strokeWidth={1.8} /> Agregar diccionario StarDict
+              <BookOpen size={16} strokeWidth={1.8} /> Agregar diccionario (.idx + .dict)
             </button>
           </div>
         )}
@@ -232,25 +194,14 @@ export default function Library({
         }}
       />
       <input
-        ref={fontRef}
-        type="file"
-        accept=".ttf,.otf"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) void addFont(f);
-          e.target.value = "";
-        }}
-      />
-      <input
         ref={dictRef}
         type="file"
         multiple
-        accept=".zip,.idx,.dict,.dz"
+        accept=".idx,.dict,.dz,.ifo"
         className="hidden"
         onChange={(e) => {
-          const files = Array.from(e.target.files ?? []);
-          if (files.length) void addDictionary(files);
+          const fs = Array.from(e.target.files ?? []);
+          if (fs.length) void addDict(fs);
           e.target.value = "";
         }}
       />
@@ -303,55 +254,30 @@ export default function Library({
         </p>
       )}
 
-      {editing && (fonts.length > 0 || dicts.length > 0) && (
-        <div className="mt-6 space-y-4 border-t border-border pt-3">
-          {fonts.length > 0 && (
-            <div>
-              <p className="text-[13px] uppercase tracking-widest text-muted-foreground">Fuentes</p>
-              {fonts.map((f) => (
-                <div key={f.id} className="flex items-center gap-2 py-1 text-[15px]">
-                  <span className="flex-1 truncate" style={{ fontFamily: `"${f.family}"` }}>
-                    {f.name}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label={`Eliminar ${f.name}`}
-                    onClick={async () => {
-                      await delFile(`font:${f.id}`);
-                      onFonts(fonts.filter((x) => x.id !== f.id));
-                    }}
-                    className="text-muted-foreground"
-                  >
-                    <Trash2 size={15} strokeWidth={1.8} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {dicts.length > 0 && (
-            <div>
-              <p className="text-[13px] uppercase tracking-widest text-muted-foreground">
-                Diccionarios
-              </p>
-              {dicts.map((d) => (
-                <div key={d.id} className="flex items-center gap-2 py-1 text-[15px]">
-                  <span className="flex-1 truncate">{d.name}</span>
-                  <button
-                    type="button"
-                    aria-label={`Eliminar ${d.name}`}
-                    onClick={async () => {
-                      await removeDictionary(d.id);
-                      onDicts(dicts.filter((x) => x.id !== d.id));
-                    }}
-                    className="text-muted-foreground"
-                  >
-                    <Trash2 size={15} strokeWidth={1.8} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+      {editing && dicts.length > 0 && (
+        <div className="mt-6 space-y-3 border-t border-border pt-3">
+          <div>
+            <p className="text-[13px] uppercase tracking-widest text-muted-foreground">
+              Diccionarios
+            </p>
+            {dicts.map((d) => (
+              <div key={d.id} className="flex items-center gap-2 py-1 text-[15px]">
+                <span className="flex-1 truncate">{d.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Eliminar ${d.name}`}
+                  onClick={async () => {
+                    await delFile(`dictidx:${d.id}`);
+                    await delFile(`dictdat:${d.id}`);
+                    onDicts(dicts.filter((x) => x.id !== d.id));
+                  }}
+                  className="text-muted-foreground"
+                >
+                  <Trash2 size={15} strokeWidth={1.8} />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
