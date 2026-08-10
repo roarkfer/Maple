@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronUp,
+  BookMarked,
+  ChevronRight,
+  Sparkle,
+  Tag,
   ChevronDown,
   Check,
   Dumbbell,
@@ -23,8 +27,8 @@ import {
 import Writer from "@/components/Writer";
 import type { Notebook, ReaderSettings } from "@/lib/library-types";
 
-type Item = { id: string; text: string; done: boolean };
-type ListKey = "habits" | "tasks" | "exercises" | "projects" | "write";
+type Item = { id: string; text: string; done: boolean; rid?: string };
+type ListKey = "habits" | "tasks" | "today" | "exercises" | "projects" | "write";
 
 type Habit = { id: string; name: string; marks: Record<string, boolean> };
 type Exercise = {
@@ -41,6 +45,17 @@ type Step = { id: string; text: string; done: boolean };
 type ProjectFolder = { id: string; name: string; collapsed: boolean; steps: Step[] };
 type Project = { id: string; name: string; folders: ProjectFolder[] };
 
+type Freq = "daily" | "weekly" | "monthly" | "yearly";
+type Rule = {
+  id: string;
+  text: string;
+  freq: Freq;
+  weekdays: number[]; // 0 = lunes … 6 = domingo
+  monthdays: number[]; // 1..31
+  yeardays: string[]; // "MM-DD"
+  lastApplied: string;
+};
+
 type Store = {
   labels: Record<ListKey, string>;
   tasks: Item[];
@@ -48,6 +63,7 @@ type Store = {
   folders: FolderT[];
   projects: Project[];
   notebooks: Notebook[];
+  recurring: Rule[];
   reader: ReaderSettings;
   lastPurge: number;
 };
@@ -58,6 +74,7 @@ const DEFAULT_STORE: Store = {
   labels: {
     habits: "Hábitos",
     tasks: "Tareas",
+    today: "Hoy",
     exercises: "Ejercicios",
     projects: "Proyectos",
     write: "Escribir",
@@ -67,8 +84,10 @@ const DEFAULT_STORE: Store = {
   folders: [],
   projects: [],
   notebooks: [],
+  recurring: [],
   reader: { fontSize: 18, fontFamily: "" },
   lastPurge: 0,
+
 };
 
 
@@ -114,6 +133,56 @@ function purge(store: Store, now = new Date()): Store {
   return { ...store, lastPurge: cutoff, tasks: store.tasks.filter((i) => !i.done) };
 }
 
+const FREQ_LABELS: Record<Freq, string> = {
+  daily: "Diario",
+  weekly: "Semanal",
+  monthly: "Mensual",
+  yearly: "Anual",
+};
+
+const MONTHS = [
+  "Ene", "Feb", "Mar", "Abr", "May", "Jun",
+  "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
+];
+
+function mmdd(d: Date) {
+  return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function ruleSlot(rule: Rule, now: Date): string | null {
+  const day = dateKey(now);
+  switch (rule.freq) {
+    case "daily":
+      return day;
+    case "weekly":
+      return rule.weekdays.includes((now.getDay() + 6) % 7) ? day : null;
+    case "monthly":
+      return rule.monthdays.includes(now.getDate()) ? day : null;
+    case "yearly":
+      return rule.yeardays.includes(mmdd(now)) ? day : null;
+  }
+}
+
+// Reglas recurrentes: agrega la tarea si falta, la desmarca si ya estaba completada.
+function applyRecurring(store: Store, now = new Date()): Store {
+  let tasks = store.tasks;
+  let changed = false;
+  const recurring = store.recurring.map((rule) => {
+    const slot = ruleSlot(rule, now);
+    if (!slot || rule.lastApplied === slot) return rule;
+    changed = true;
+    const existing = tasks.find((t) => t.rid === rule.id);
+    if (!existing) {
+      tasks = [...tasks, { id: nextId(), text: rule.text, done: false, rid: rule.id }];
+    } else if (existing.done) {
+      tasks = tasks.map((t) => (t.rid === rule.id ? { ...t, done: false } : t));
+    }
+    return { ...rule, lastApplied: slot };
+  });
+  return changed ? { ...store, tasks, recurring } : store;
+}
+
+
 function migrate(raw: unknown): Store {
   const parsed = { ...DEFAULT_STORE, ...(raw as Partial<Store> & { lists?: any }) };
   const legacy = (raw as any)?.lists;
@@ -135,9 +204,18 @@ function migrate(raw: unknown): Store {
       ...p,
       folders: (p.folders ?? []).map((f) => ({ ...f, collapsed: !!f.collapsed, steps: f.steps ?? [] })),
     })),
-    notebooks: parsed.notebooks ?? [],
+    notebooks: (parsed.notebooks ?? []).map((n) => ({ ...n, tags: n.tags ?? [] })),
+    recurring: (parsed.recurring ?? []).map((r) => ({
+      ...r,
+      weekdays: r.weekdays ?? [],
+      monthdays: r.monthdays ?? [],
+      yeardays: r.yeardays ?? [],
+      lastApplied: r.lastApplied ?? "",
+    })),
+
     reader: { ...DEFAULT_STORE.reader, ...(parsed.reader ?? {}) },
     lastPurge: parsed.lastPurge ?? 0,
+
   };
 }
 
@@ -276,7 +354,7 @@ const DARK_KEY = "maple-dark";
 export default function App() {
   const [store, setStore] = useState<Store>(DEFAULT_STORE);
   const [ready, setReady] = useState(false);
-  const [tab, setTab] = useState<ListKey>("tasks");
+  const [tab, setTab] = useState<ListKey>("today");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [openFolder, setOpenFolder] = useState<string | null>(null);
@@ -284,16 +362,20 @@ export default function App() {
   const [openNotebook, setOpenNotebook] = useState<string | null>(null);
   const [openProject, setOpenProject] = useState<string | null>(null);
   const [dark, setDark] = useState(false);
+  const [openGrimorio, setOpenGrimorio] = useState(false);
+  const [openTags, setOpenTags] = useState<string[]>([]);
+  const [recurOpen, setRecurOpen] = useState(false);
+  const [recurFreq, setRecurFreq] = useState<Freq | null>(null);
+  const [recurWeek, setRecurWeek] = useState<number[]>([]);
+  const [recurMonth, setRecurMonth] = useState<number[]>([]);
+  const [recurYear, setRecurYear] = useState<string[]>([]);
+  const [yearMonth, setYearMonth] = useState(new Date().getMonth());
   const inputRef = useRef<HTMLInputElement>(null);
-
-
-
-
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      setStore(purge(migrate(raw ? JSON.parse(raw) : {})));
+      setStore(applyRecurring(purge(migrate(raw ? JSON.parse(raw) : {}))));
       setDark(localStorage.getItem(DARK_KEY) === "1");
     } catch {
       setStore(DEFAULT_STORE);
@@ -311,12 +393,13 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
   }, [store, ready]);
 
-  // Revisa cada minuto por si la app queda abierta pasada la 2 am.
+  // Revisa cada minuto por si la app queda abierta pasada la 2 am o cambia la hora.
   useEffect(() => {
     if (!ready) return;
-    const id = setInterval(() => setStore((s) => purge(s)), 60_000);
+    const id = setInterval(() => setStore((s) => applyRecurring(purge(s))), 60_000);
     return () => clearInterval(id);
   }, [ready]);
+
 
   const today = useMemo(() => {
     const d = new Date();
@@ -338,9 +421,15 @@ export default function App() {
   const inFolderList = tab === "exercises" && folder === null;
   const inHabit = tab === "habits" && habit !== null;
   const inNotebook = tab === "write" && notebook !== null;
+  const inGrimorio = tab === "write" && openGrimorio && !inNotebook;
   const inProject = tab === "projects" && project !== null;
   const inProjectList = tab === "projects" && project === null;
 
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    store.notebooks.forEach((n) => (n.tags ?? []).forEach((t) => set.add(t)));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "es"));
+  }, [store.notebooks]);
 
   const toggleTask = useCallback(
     (id: string) =>
@@ -352,9 +441,18 @@ export default function App() {
   );
 
   const removeTask = useCallback(
-    (id: string) => setStore((s) => ({ ...s, tasks: s.tasks.filter((i) => i.id !== id) })),
+    (id: string) =>
+      setStore((s) => {
+        const item = s.tasks.find((i) => i.id === id);
+        return {
+          ...s,
+          tasks: s.tasks.filter((i) => i.id !== id),
+          recurring: item?.rid ? s.recurring.filter((r) => r.id !== item.rid) : s.recurring,
+        };
+      }),
     [],
   );
+
 
   const updateHabit = useCallback(
     (id: string, fn: (h: Habit) => Habit) =>
@@ -409,7 +507,10 @@ export default function App() {
     if (tab === "write") {
       setStore((s) => ({
         ...s,
-        notebooks: [...s.notebooks, { id: nextId(), name: text, text: "", updatedAt: Date.now() }],
+        notebooks: [
+          ...s.notebooks,
+          { id: nextId(), name: text, text: "", updatedAt: Date.now(), tags: [] },
+        ],
       }));
     } else if (tab === "habits") {
       setStore((s) => ({ ...s, habits: [...s.habits, { id: nextId(), name: text, marks: {} }] }));
@@ -436,6 +537,22 @@ export default function App() {
           { id: nextId(), name: text, sets: 4, reps: 12, kg: 10, done: [] },
         ],
       }));
+    } else if (recurOpen && recurFreq) {
+      const rule: Rule = {
+        id: nextId(),
+        text,
+        freq: recurFreq,
+        weekdays: recurWeek,
+        monthdays: recurMonth,
+        yeardays: recurYear,
+        lastApplied: "",
+      };
+      setStore((s) => applyRecurring({ ...s, recurring: [...s.recurring, rule] }));
+      setRecurOpen(false);
+      setRecurFreq(null);
+      setRecurWeek([]);
+      setRecurMonth([]);
+      setRecurYear([]);
     } else {
       setStore((s) => ({ ...s, tasks: [...s.tasks, { id: nextId(), text, done: false }] }));
     }
@@ -453,6 +570,11 @@ export default function App() {
     folder,
     updateFolder,
     updateProject,
+    recurOpen,
+    recurFreq,
+    recurWeek,
+    recurMonth,
+    recurYear,
   ]);
 
   const tabs = useMemo(
@@ -460,12 +582,14 @@ export default function App() {
       [
         { key: "habits" as const, Icon: Repeat },
         { key: "tasks" as const, Icon: Check },
+        { key: "today" as const, Icon: Sparkle },
         { key: "exercises" as const, Icon: Dumbbell },
         { key: "projects" as const, Icon: ListTree },
         { key: "write" as const, Icon: PenLine },
       ],
     [],
   );
+
 
 
   if (inNotebook && notebook) {
@@ -482,36 +606,65 @@ export default function App() {
             ),
           }))
         }
+        onTagsChange={(tags) =>
+          setStore((s) => ({
+            ...s,
+            notebooks: s.notebooks.map((n) => (n.id === notebook.id ? { ...n, tags } : n)),
+          }))
+        }
       />
     );
   }
 
+  const goTab = (key: ListKey) => {
+    setTab(key);
+    setOpenFolder(null);
+    setOpenHabit(null);
+    setOpenNotebook(null);
+    setOpenProject(null);
+    setOpenGrimorio(false);
+  };
+
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-background px-3 pb-6 pt-3 text-foreground">
-      <nav className="grid grid-cols-5 items-stretch gap-1">
-        {tabs.map(({ key, Icon }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => {
-              setTab(key);
-              setOpenFolder(null);
-              setOpenHabit(null);
-              setOpenNotebook(null);
-              setOpenProject(null);
-            }}
-            aria-pressed={tab === key}
-            className={`flex flex-col items-center gap-1 rounded-md border px-1 py-2 text-[12px] tracking-wide ${
-              tab === key
-                ? "border-foreground bg-foreground text-background"
-                : "border-border text-muted-foreground"
-            }`}
-          >
-            <Icon size={18} strokeWidth={1.75} />
-            <span className="w-full truncate text-center">{store.labels[key]}</span>
-          </button>
-        ))}
+      {/* Estrella del norte — pestaña Hoy, centrada arriba de las demás */}
+      <div className="flex justify-center">
+        <button
+          type="button"
+          onClick={() => goTab("today")}
+          aria-pressed={tab === "today"}
+          aria-label="Hoy"
+          className={`flex items-center justify-center rounded-full border size-14 ${
+            tab === "today"
+              ? "border-foreground bg-foreground text-background"
+              : "border-border text-muted-foreground"
+          }`}
+        >
+          <Sparkle size={26} strokeWidth={1.75} />
+        </button>
+      </div>
+
+      <nav className="mt-3 grid grid-cols-5 items-stretch gap-1">
+        {tabs
+          .filter(({ key }) => key !== "today")
+          .map(({ key, Icon }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => goTab(key)}
+              aria-pressed={tab === key}
+              className={`flex flex-col items-center gap-1 rounded-md border px-1 py-2 text-[12px] tracking-wide ${
+                tab === key
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border text-muted-foreground"
+              }`}
+            >
+              <Icon size={18} strokeWidth={1.75} />
+              <span className="w-full truncate text-center">{store.labels[key]}</span>
+            </button>
+          ))}
       </nav>
+
 
 
       <button
@@ -587,7 +740,7 @@ export default function App() {
       )}
 
       <div className="mt-4 flex items-center gap-2">
-        {(inFolder || inHabit || inNotebook || inProject) && (
+        {(inFolder || inHabit || inNotebook || inProject || inGrimorio) && (
           <button
             type="button"
             onClick={() => {
@@ -595,6 +748,7 @@ export default function App() {
               setOpenHabit(null);
               setOpenNotebook(null);
               setOpenProject(null);
+              setOpenGrimorio(false);
             }}
             aria-label="Volver"
             className="-ml-1 flex size-10 items-center justify-center rounded-lg border border-border text-muted-foreground active:scale-95"
@@ -611,12 +765,131 @@ export default function App() {
                 ? project.name
                 : inNotebook && notebook
                   ? notebook.name
-                  : store.labels[tab]}
+                  : inGrimorio
+                    ? "Grimorio"
+                    : tab === "today"
+                      ? "Hoy"
+                      : store.labels[tab]}
         </h1>
+
       </div>
 
 
-      {inProjectList ? (
+      {tab === "today" ? (
+        <div className="mt-2 flex-1 space-y-5">
+          <section>
+            <p className="text-[13px] tracking-widest text-muted-foreground">
+              {store.labels.tasks}
+            </p>
+            <ul className="divide-y divide-border">
+              {store.tasks
+                .filter((t) => !t.done)
+                .map((t) => (
+                  <li key={t.id} className="flex items-center gap-3 py-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleTask(t.id)}
+                      aria-label={`Completar ${t.text}`}
+                      className="flex size-6 shrink-0 items-center justify-center rounded-sm border border-foreground"
+                    />
+                    <span className="flex-1 text-[17px] leading-snug">{t.text}</span>
+                  </li>
+                ))}
+              {store.tasks.every((t) => t.done) && (
+                <li className="py-2 text-[15px] text-muted-foreground">Nada pendiente.</li>
+              )}
+            </ul>
+          </section>
+
+          <section>
+            <p className="text-[13px] tracking-widest text-muted-foreground">
+              {store.labels.habits}
+            </p>
+            <ul className="divide-y divide-border">
+              {store.habits.map((h) => (
+                <li key={h.id} className="flex items-center gap-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateHabit(h.id, (x) => ({
+                        ...x,
+                        marks: { ...x.marks, [todayKey]: !x.marks[todayKey] },
+                      }))
+                    }
+                    aria-label={`Marcar ${h.name}`}
+                    className={`flex size-6 shrink-0 items-center justify-center rounded-sm border border-foreground ${
+                      h.marks[todayKey] ? "bg-foreground text-background" : ""
+                    }`}
+                  >
+                    {h.marks[todayKey] && <Check size={14} strokeWidth={2.4} />}
+                  </button>
+                  <span className="flex-1 text-[17px] leading-snug">{h.name}</span>
+                </li>
+              ))}
+              {store.habits.length === 0 && (
+                <li className="py-2 text-[15px] text-muted-foreground">Sin hábitos.</li>
+              )}
+            </ul>
+          </section>
+
+          <section>
+            <p className="text-[13px] tracking-widest text-muted-foreground">
+              {store.labels.exercises}
+            </p>
+            <ul className="divide-y divide-border">
+              {store.folders.flatMap((f) =>
+                f.exercises
+                  .filter((x) => (x.done ?? []).filter(Boolean).length < x.sets)
+                  .map((x) => (
+                    <li key={x.id} className="flex items-center gap-2 py-2 text-[16px]">
+                      <Dumbbell
+                        size={16}
+                        strokeWidth={1.75}
+                        className="shrink-0 text-muted-foreground"
+                      />
+                      <span className="flex-1 truncate">{x.name}</span>
+                      <span className="text-[14px] text-muted-foreground">
+                        {(x.done ?? []).filter(Boolean).length}/{x.sets} · {f.name}
+                      </span>
+                    </li>
+                  )),
+              )}
+              {store.folders.every((f) =>
+                f.exercises.every((x) => (x.done ?? []).filter(Boolean).length >= x.sets),
+              ) && <li className="py-2 text-[15px] text-muted-foreground">Sin sets pendientes.</li>}
+            </ul>
+          </section>
+
+          <section>
+            <p className="text-[13px] tracking-widest text-muted-foreground">
+              {store.labels.projects}
+            </p>
+            <ul className="divide-y divide-border">
+              {store.projects.map((p) => {
+                const next = p.folders.flatMap((f) => f.steps).find((s) => !s.done);
+                if (!next) return null;
+                return (
+                  <li key={p.id} className="flex items-center gap-2 py-2 text-[16px]">
+                    <Hammer
+                      size={16}
+                      strokeWidth={1.75}
+                      className="shrink-0 text-muted-foreground"
+                    />
+                    <span className="flex-1 truncate">{next.text}</span>
+                    <span className="max-w-24 truncate text-[14px] text-muted-foreground">
+                      {p.name}
+                    </span>
+                  </li>
+                );
+              })}
+              {store.projects.every((p) => !p.folders.flatMap((f) => f.steps).some((s) => !s.done)) && (
+                <li className="py-2 text-[15px] text-muted-foreground">Sin próximos pasos.</li>
+              )}
+            </ul>
+          </section>
+        </div>
+      ) : inProjectList ? (
+
         <ul className="mt-2 flex-1 divide-y divide-border">
           {store.projects.map((p, pi) => {
             const pct = projectPct(p);
@@ -844,10 +1117,77 @@ export default function App() {
             <p className="py-6 text-[16px] text-muted-foreground">Sin carpetas. Agrega una abajo.</p>
           )}
         </div>
+      ) : inGrimorio ? (
+        <ul className="mt-2 flex-1 divide-y divide-border">
+          {allTags.map((t) => {
+            const open = openTags.includes(t);
+            const books = store.notebooks.filter((n) => (n.tags ?? []).includes(t));
+            return (
+              <li key={t} className="py-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOpenTags((prev) =>
+                      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t],
+                    )
+                  }
+                  aria-expanded={open}
+                  className="flex w-full items-center gap-2 py-1 text-left text-[17px]"
+                >
+                  {open ? (
+                    <ChevronDown size={16} strokeWidth={1.9} />
+                  ) : (
+                    <ChevronRight size={16} strokeWidth={1.9} />
+                  )}
+                  <Tag size={15} strokeWidth={1.8} className="text-muted-foreground" />
+                  <span className="flex-1 truncate">{t}</span>
+                  <span className="text-[13px] text-muted-foreground">{books.length}</span>
+                </button>
+                {open && (
+                  <ul className="ml-6 border-l border-border pl-3">
+                    {books.map((n) => (
+                      <li key={n.id}>
+                        <button
+                          type="button"
+                          onClick={() => setOpenNotebook(n.id)}
+                          className="flex w-full items-center gap-2 py-2 text-left text-[16px]"
+                        >
+                          <NotebookIcon
+                            size={16}
+                            strokeWidth={1.75}
+                            className="shrink-0 text-muted-foreground"
+                          />
+                          <span className="truncate">{n.name}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
+          {ready && allTags.length === 0 && (
+            <li className="py-6 text-[16px] text-muted-foreground">
+              Aún no hay etiquetas. Agrégalas dentro de una libreta.
+            </li>
+          )}
+        </ul>
       ) : tab === "write" ? (
         (
           <ul className="mt-2 flex-1 divide-y divide-border">
+            <li className="flex items-center gap-3 py-3">
+              <BookMarked size={20} strokeWidth={1.75} className="shrink-0" />
+              <button
+                type="button"
+                onClick={() => setOpenGrimorio(true)}
+                className="flex-1 text-left text-[17px] leading-snug tracking-wide"
+              >
+                Grimorio
+              </button>
+              <span className="text-[13px] text-muted-foreground">{allTags.length}</span>
+            </li>
             {store.notebooks.map((n, ni) => (
+
               <li key={n.id} className="flex items-center gap-3 py-3">
                 <NotebookIcon size={18} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
                 {editing ? (
@@ -1231,46 +1571,183 @@ export default function App() {
         </ul>
       )}
 
-      {!inHabit && !inNotebook && (
+      {!inHabit && !inNotebook && !inGrimorio && tab !== "today" && (
         <form
           onSubmit={(e) => {
             e.preventDefault();
             add();
           }}
-          className="mt-3 flex items-center gap-2 border-t border-border pt-3"
+          className="mt-3 border-t border-border pt-3"
         >
-          <input
-            ref={inputRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={
-              inProjectList
-                ? "Nuevo proyecto…"
-                : inProject
-                  ? "Nueva carpeta…"
-                  : inFolderList
+          {tab === "tasks" && recurOpen && (
+            <div className="mb-2 space-y-2 rounded-md border border-border p-2">
+              <div className="flex flex-wrap gap-1">
+                {(Object.keys(FREQ_LABELS) as Freq[]).map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setRecurFreq(f)}
+                    aria-pressed={recurFreq === f}
+                    className={`rounded-md border px-2 py-1 text-[13px] ${
+                      recurFreq === f
+                        ? "border-foreground bg-foreground text-background"
+                        : "border-border text-muted-foreground"
+                    }`}
+                  >
+                    {FREQ_LABELS[f]}
+                  </button>
+                ))}
+              </div>
+
+              {recurFreq === "weekly" && (
+                <div className="flex gap-1">
+                  {DAY_LABELS.map((d, i) => (
+                    <button
+                      key={`${d}${i}`}
+                      type="button"
+                      onClick={() =>
+                        setRecurWeek((prev) =>
+                          prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i],
+                        )
+                      }
+                      aria-pressed={recurWeek.includes(i)}
+                      className={`flex-1 rounded-sm border py-1 text-[12px] ${
+                        recurWeek.includes(i)
+                          ? "border-foreground bg-foreground text-background"
+                          : "border-border text-muted-foreground"
+                      }`}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {recurFreq === "monthly" && (
+                <div className="grid grid-cols-7 gap-1">
+                  {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() =>
+                        setRecurMonth((prev) =>
+                          prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d],
+                        )
+                      }
+                      aria-pressed={recurMonth.includes(d)}
+                      className={`rounded-sm border py-1 text-[12px] ${
+                        recurMonth.includes(d)
+                          ? "border-foreground bg-foreground text-background"
+                          : "border-border text-muted-foreground"
+                      }`}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {recurFreq === "yearly" && (
+                <div className="space-y-1">
+                  <div className="flex flex-wrap gap-1">
+                    {MONTHS.map((m, mi) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setYearMonth(mi)}
+                        aria-pressed={yearMonth === mi}
+                        className={`rounded-md border px-2 py-1 text-[12px] ${
+                          yearMonth === mi
+                            ? "border-foreground bg-foreground text-background"
+                            : "border-border text-muted-foreground"
+                        }`}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-1">
+                    {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => {
+                      const key = `${String(yearMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+                      const on = recurYear.includes(key);
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() =>
+                            setRecurYear((prev) =>
+                              prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key],
+                            )
+                          }
+                          aria-pressed={on}
+                          className={`rounded-sm border py-1 text-[12px] ${
+                            on
+                              ? "border-foreground bg-foreground text-background"
+                              : "border-border text-muted-foreground"
+                          }`}
+                        >
+                          {d}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <input
+              ref={inputRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={
+                inProjectList
+                  ? "Nuevo proyecto…"
+                  : inProject
                     ? "Nueva carpeta…"
-                    : inFolder
-                      ? "Nuevo ejercicio…"
-                      : tab === "habits"
-                        ? "Nuevo hábito…"
-                    : "Agregar…"
-            }
-            className="w-full bg-transparent py-2 text-[17px] outline-none placeholder:text-muted-foreground"
-          />
-          <button
-            type="submit"
-            aria-label={inFolderList ? "Agregar carpeta" : "Agregar"}
-            className="flex size-9 shrink-0 items-center justify-center rounded-md border border-foreground"
-          >
-            {inFolderList ? (
-              <Folder size={18} strokeWidth={1.75} />
-            ) : (
-              <Plus size={18} strokeWidth={1.75} />
+                    : inFolderList
+                      ? "Nueva carpeta…"
+                      : inFolder
+                        ? "Nuevo ejercicio…"
+                        : tab === "habits"
+                          ? "Nuevo hábito…"
+                          : recurOpen
+                            ? "Tarea recurrente…"
+                            : "Agregar…"
+              }
+              className="w-full bg-transparent py-2 text-[17px] outline-none placeholder:text-muted-foreground"
+            />
+            <button
+              type="submit"
+              aria-label={inFolderList ? "Agregar carpeta" : "Agregar"}
+              className="flex size-9 shrink-0 items-center justify-center rounded-md border border-foreground"
+            >
+              {inFolderList ? (
+                <Folder size={18} strokeWidth={1.75} />
+              ) : (
+                <Plus size={18} strokeWidth={1.75} />
+              )}
+            </button>
+            {tab === "tasks" && (
+              <button
+                type="button"
+                onClick={() => setRecurOpen((v) => !v)}
+                aria-pressed={recurOpen}
+                aria-label="Recurrente"
+                className={`flex size-9 shrink-0 items-center justify-center rounded-md border ${
+                  recurOpen
+                    ? "border-foreground bg-foreground text-background"
+                    : "border-border text-muted-foreground"
+                }`}
+              >
+                <Repeat size={17} strokeWidth={1.75} />
+              </button>
             )}
-          </button>
+          </div>
         </form>
       )}
+
 
       <p className="mt-3 text-[12px] uppercase tracking-widest text-muted-foreground">
         Las tareas completadas se borran a las 2:00 am
