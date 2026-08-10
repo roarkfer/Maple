@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  BookOpen,
   ChevronLeft,
   ChevronUp,
   ChevronDown,
   Check,
   Dumbbell,
   Folder,
+  Hammer,
+  ListTree,
   Minus,
   Moon,
   Pencil,
   PenLine,
+  Notebook as NotebookIcon,
   Plus,
   Repeat,
   Square,
@@ -18,21 +20,11 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import Library, { registerFont } from "@/components/Library";
-import { setUserDicts } from "@/lib/userdict";
-import Reader from "@/components/Reader";
 import Writer from "@/components/Writer";
-import { getFile } from "@/lib/idb";
-import type {
-  BookMeta,
-  DictMeta,
-  FontMeta,
-  Notebook,
-  ReaderSettings,
-} from "@/lib/library-types";
+import type { Notebook, ReaderSettings } from "@/lib/library-types";
 
 type Item = { id: string; text: string; done: boolean };
-type ListKey = "habits" | "tasks" | "exercises" | "read" | "write";
+type ListKey = "habits" | "tasks" | "exercises" | "projects" | "write";
 
 type Habit = { id: string; name: string; marks: Record<string, boolean> };
 type Exercise = {
@@ -45,14 +37,16 @@ type Exercise = {
 };
 type FolderT = { id: string; name: string; exercises: Exercise[] };
 
+type Step = { id: string; text: string; done: boolean };
+type ProjectFolder = { id: string; name: string; collapsed: boolean; steps: Step[] };
+type Project = { id: string; name: string; folders: ProjectFolder[] };
+
 type Store = {
   labels: Record<ListKey, string>;
   tasks: Item[];
   habits: Habit[];
   folders: FolderT[];
-  books: BookMeta[];
-  dicts: DictMeta[];
-  fonts: FontMeta[];
+  projects: Project[];
   notebooks: Notebook[];
   reader: ReaderSettings;
   lastPurge: number;
@@ -65,15 +59,13 @@ const DEFAULT_STORE: Store = {
     habits: "Hábitos",
     tasks: "Tareas",
     exercises: "Ejercicios",
-    read: "Biblioteca",
+    projects: "Proyectos",
     write: "Escribir",
   },
   tasks: [],
   habits: [],
   folders: [],
-  books: [],
-  dicts: [],
-  fonts: [],
+  projects: [],
   notebooks: [],
   reader: { fontSize: 18, fontFamily: "" },
   lastPurge: 0,
@@ -131,16 +123,18 @@ function migrate(raw: unknown): Store {
     : ((legacy?.habits ?? []) as Item[]).map((i) => ({ id: i.id, name: i.text, marks: {} }));
   return {
     labels: (() => {
-      const l = { ...DEFAULT_STORE.labels, ...(parsed.labels ?? {}) };
-      if (l.read === "Leer") l.read = "Biblioteca";
+      const l = { ...DEFAULT_STORE.labels, ...(parsed.labels ?? {}) } as Record<ListKey, string>;
+      const old = (parsed.labels as any)?.projects;
+      if (!old || old === "Leer" || old === "Biblioteca") l.projects = "Proyectos";
       return l;
     })(),
     tasks,
     habits: habits.map((h) => ({ ...h, marks: h.marks ?? {} })),
     folders: parsed.folders ?? [],
-    books: parsed.books ?? [],
-    dicts: parsed.dicts ?? [],
-    fonts: parsed.fonts ?? [],
+    projects: (parsed.projects ?? []).map((p) => ({
+      ...p,
+      folders: (p.folders ?? []).map((f) => ({ ...f, collapsed: !!f.collapsed, steps: f.steps ?? [] })),
+    })),
     notebooks: parsed.notebooks ?? [],
     reader: { ...DEFAULT_STORE.reader, ...(parsed.reader ?? {}) },
     lastPurge: parsed.lastPurge ?? 0,
@@ -271,6 +265,12 @@ function YearView({ habit }: { habit: Habit }) {
   );
 }
 
+function projectPct(p: Project) {
+  const steps = p.folders.flatMap((f) => f.steps);
+  if (steps.length === 0) return 0;
+  return Math.round((steps.filter((s) => s.done).length / steps.length) * 100);
+}
+
 const DARK_KEY = "maple-dark";
 
 export default function App() {
@@ -282,23 +282,10 @@ export default function App() {
   const [openFolder, setOpenFolder] = useState<string | null>(null);
   const [openHabit, setOpenHabit] = useState<string | null>(null);
   const [openNotebook, setOpenNotebook] = useState<string | null>(null);
-  const [openBook, setOpenBook] = useState<string | null>(null);
+  const [openProject, setOpenProject] = useState<string | null>(null);
   const [dark, setDark] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Registra las fuentes .ttf guardadas.
-  const fontsKey = store.fonts.map((f) => f.id).join(",");
-  useEffect(() => {
-    if (!ready) return;
-    store.fonts.forEach((f) => void registerFont(f.family, f.id));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, fontsKey]);
-
-  const dictsKey = store.dicts.map((d) => d.id).join(",");
-  useEffect(() => {
-    setUserDicts(store.dicts);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dictsKey]);
 
 
 
@@ -345,12 +332,14 @@ export default function App() {
   const folder = store.folders.find((f) => f.id === openFolder) ?? null;
   const habit = store.habits.find((h) => h.id === openHabit) ?? null;
   const notebook = store.notebooks.find((n) => n.id === openNotebook) ?? null;
-  const book = store.books.find((b) => b.id === openBook) ?? null;
-  
+  const project = store.projects.find((p) => p.id === openProject) ?? null;
+
   const inFolder = tab === "exercises" && folder !== null;
   const inFolderList = tab === "exercises" && folder === null;
   const inHabit = tab === "habits" && habit !== null;
   const inNotebook = tab === "write" && notebook !== null;
+  const inProject = tab === "projects" && project !== null;
+  const inProjectList = tab === "projects" && project === null;
 
 
   const toggleTask = useCallback(
@@ -379,6 +368,27 @@ export default function App() {
     [],
   );
 
+  const updateProject = useCallback(
+    (id: string, fn: (p: Project) => Project) =>
+      setStore((s) => ({ ...s, projects: s.projects.map((p) => (p.id === id ? fn(p) : p)) })),
+    [],
+  );
+
+  const updateProjectFolder = useCallback(
+    (pid: string, fid: string, fn: (f: ProjectFolder) => ProjectFolder) =>
+      setStore((s) => ({
+        ...s,
+        projects: s.projects.map((p) =>
+          p.id === pid
+            ? { ...p, folders: p.folders.map((f) => (f.id === fid ? fn(f) : f)) }
+            : p,
+        ),
+      })),
+    [],
+  );
+
+
+
   const clearAllSets = useCallback(() => {
     setStore((s) => ({
       ...s,
@@ -403,6 +413,16 @@ export default function App() {
       }));
     } else if (tab === "habits") {
       setStore((s) => ({ ...s, habits: [...s.habits, { id: nextId(), name: text, marks: {} }] }));
+    } else if (inProjectList) {
+      setStore((s) => ({
+        ...s,
+        projects: [...s.projects, { id: nextId(), name: text, folders: [] }],
+      }));
+    } else if (inProject && project) {
+      updateProject(project.id, (p) => ({
+        ...p,
+        folders: [...p.folders, { id: nextId(), name: text, collapsed: false, steps: [] }],
+      }));
     } else if (inFolderList) {
       setStore((s) => ({
         ...s,
@@ -421,7 +441,19 @@ export default function App() {
     }
     setDraft("");
     inputRef.current?.focus();
-  }, [draft, tab, inFolder, inFolderList, inHabit, folder, updateFolder]);
+  }, [
+    draft,
+    tab,
+    inFolder,
+    inFolderList,
+    inHabit,
+    inProject,
+    inProjectList,
+    project,
+    folder,
+    updateFolder,
+    updateProject,
+  ]);
 
   const tabs = useMemo(
     () =>
@@ -429,7 +461,7 @@ export default function App() {
         { key: "habits" as const, Icon: Repeat },
         { key: "tasks" as const, Icon: Check },
         { key: "exercises" as const, Icon: Dumbbell },
-        { key: "read" as const, Icon: BookOpen },
+        { key: "projects" as const, Icon: ListTree },
         { key: "write" as const, Icon: PenLine },
       ],
     [],
@@ -454,23 +486,6 @@ export default function App() {
     );
   }
 
-  if (openBook && book) {
-    return (
-      <Reader
-        book={book}
-        settings={store.reader}
-        onSettings={(reader) => setStore((s) => ({ ...s, reader }))}
-        onProgress={(progress) =>
-          setStore((s) => ({
-            ...s,
-            books: s.books.map((b) => (b.id === book.id ? { ...b, progress } : b)),
-          }))
-        }
-        onBack={() => setOpenBook(null)}
-      />
-    );
-  }
-
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-background px-3 pb-6 pt-3 text-foreground">
       <nav className="grid grid-cols-5 items-stretch gap-1">
@@ -483,6 +498,7 @@ export default function App() {
               setOpenFolder(null);
               setOpenHabit(null);
               setOpenNotebook(null);
+              setOpenProject(null);
             }}
             aria-pressed={tab === key}
             className={`flex flex-col items-center gap-1 rounded-md border px-1 py-2 text-[12px] tracking-wide ${
@@ -571,13 +587,14 @@ export default function App() {
       )}
 
       <div className="mt-4 flex items-center gap-2">
-        {(inFolder || inHabit || inNotebook) && (
+        {(inFolder || inHabit || inNotebook || inProject) && (
           <button
             type="button"
             onClick={() => {
               setOpenFolder(null);
               setOpenHabit(null);
               setOpenNotebook(null);
+              setOpenProject(null);
             }}
             aria-label="Volver"
             className="-ml-1 flex size-10 items-center justify-center rounded-lg border border-border text-muted-foreground active:scale-95"
@@ -590,30 +607,249 @@ export default function App() {
             ? folder.name
             : inHabit && habit
               ? habit.name
-              : inNotebook && notebook
-                ? notebook.name
-                : store.labels[tab]}
+              : inProject && project
+                ? project.name
+                : inNotebook && notebook
+                  ? notebook.name
+                  : store.labels[tab]}
         </h1>
       </div>
 
 
-      {tab === "read" ? (
-        <Library
-          books={store.books}
-          dicts={store.dicts}
-          fonts={store.fonts}
-          editing={editing}
-          onBooks={(books) => setStore((s) => ({ ...s, books }))}
-          onDicts={(dicts) => setStore((s) => ({ ...s, dicts }))}
-          onFonts={(fonts) => setStore((s) => ({ ...s, fonts }))}
-          onOpen={(id) => setOpenBook(id)}
-        />
+      {inProjectList ? (
+        <ul className="mt-2 flex-1 divide-y divide-border">
+          {store.projects.map((p, pi) => {
+            const pct = projectPct(p);
+            return (
+              <li key={p.id} className="flex items-center gap-3 py-3">
+                <Hammer size={18} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+                {editing ? (
+                  <input
+                    value={p.name}
+                    onChange={(e) => updateProject(p.id, (x) => ({ ...x, name: e.target.value }))}
+                    className="flex-1 bg-transparent py-1 text-[17px] outline-none"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setOpenProject(p.id)}
+                    className="flex-1 text-left text-[17px] leading-snug"
+                  >
+                    {p.name}
+                  </button>
+                )}
+                <span className="w-24 shrink-0">
+                  <span className="block text-right text-[13px] tabular-nums text-muted-foreground">
+                    {pct}%
+                  </span>
+                  <span className="mt-1 block h-1.5 w-full overflow-hidden rounded-full border border-border">
+                    <span
+                      className="block h-full bg-foreground"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </span>
+                </span>
+                {editing && (
+                  <Reorder
+                    first={pi === 0}
+                    last={pi === store.projects.length - 1}
+                    onMove={(dir) =>
+                      setStore((s) => ({ ...s, projects: move(s.projects, pi, pi + dir) }))
+                    }
+                  />
+                )}
+                {editing && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setStore((s) => ({ ...s, projects: s.projects.filter((x) => x.id !== p.id) }))
+                    }
+                    aria-label="Eliminar proyecto"
+                    className="text-muted-foreground"
+                  >
+                    <Trash2 size={16} strokeWidth={1.75} />
+                  </button>
+                )}
+              </li>
+            );
+          })}
+          {ready && store.projects.length === 0 && (
+            <li className="py-6 text-[16px] text-muted-foreground">
+              Sin proyectos. Agrega uno abajo.
+            </li>
+          )}
+        </ul>
+      ) : inProject && project ? (
+        <div className="mt-2 flex-1 divide-y divide-border">
+          {project.folders.map((f, fi) => (
+            <div key={f.id} className="py-3">
+              <div className="flex items-center gap-2">
+                {editing ? (
+                  <input
+                    value={f.name}
+                    onChange={(e) =>
+                      updateProjectFolder(project.id, f.id, (x) => ({ ...x, name: e.target.value }))
+                    }
+                    className="flex-1 bg-transparent py-1 text-[17px] outline-none"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateProjectFolder(project.id, f.id, (x) => ({
+                        ...x,
+                        collapsed: !x.collapsed,
+                      }))
+                    }
+                    className="flex flex-1 items-center gap-2 text-left text-[17px] leading-snug"
+                  >
+                    {f.collapsed ? (
+                      <ChevronDown size={16} strokeWidth={1.9} className="text-muted-foreground" />
+                    ) : (
+                      <ChevronUp size={16} strokeWidth={1.9} className="text-muted-foreground" />
+                    )}
+                    <Folder size={16} strokeWidth={1.75} className="text-muted-foreground" />
+                    {f.name}
+                  </button>
+                )}
+                {editing && (
+                  <Reorder
+                    first={fi === 0}
+                    last={fi === project.folders.length - 1}
+                    onMove={(dir) =>
+                      updateProject(project.id, (p) => ({
+                        ...p,
+                        folders: move(p.folders, fi, fi + dir),
+                      }))
+                    }
+                  />
+                )}
+                {editing && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateProject(project.id, (p) => ({
+                        ...p,
+                        folders: p.folders.filter((x) => x.id !== f.id),
+                      }))
+                    }
+                    aria-label="Eliminar carpeta"
+                    className="text-muted-foreground"
+                  >
+                    <Trash2 size={16} strokeWidth={1.75} />
+                  </button>
+                )}
+                {!f.collapsed && (
+                  <button
+                    type="button"
+                    aria-label={`Agregar paso a ${f.name}`}
+                    onClick={() =>
+                      updateProjectFolder(project.id, f.id, (x) => ({
+                        ...x,
+                        steps: [
+                          ...x.steps,
+                          { id: nextId(), text: `Paso ${x.steps.length + 1}`, done: false },
+                        ],
+                      }))
+                    }
+                    className="flex size-8 shrink-0 items-center justify-center rounded-md border border-foreground active:scale-95"
+                  >
+                    <Plus size={16} strokeWidth={1.9} />
+                  </button>
+                )}
+              </div>
+
+              {!f.collapsed && (
+                <ul className="mt-2 space-y-2 pl-6">
+                  {f.steps.map((st, si) => (
+                    <li key={st.id} className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        aria-label={st.done ? "Marcar como pendiente" : "Marcar como terminado"}
+                        onClick={() =>
+                          updateProjectFolder(project.id, f.id, (x) => ({
+                            ...x,
+                            steps: x.steps.map((y) =>
+                              y.id === st.id ? { ...y, done: !y.done } : y,
+                            ),
+                          }))
+                        }
+                        className={`flex size-6 shrink-0 items-center justify-center rounded border ${
+                          st.done
+                            ? "border-foreground bg-foreground text-background"
+                            : "border-border"
+                        }`}
+                      >
+                        {st.done && <Check size={14} strokeWidth={3} />}
+                      </button>
+                      {editing ? (
+                        <input
+                          value={st.text}
+                          onChange={(e) =>
+                            updateProjectFolder(project.id, f.id, (x) => ({
+                              ...x,
+                              steps: x.steps.map((y) =>
+                                y.id === st.id ? { ...y, text: e.target.value } : y,
+                              ),
+                            }))
+                          }
+                          className="flex-1 bg-transparent py-1 text-[17px] outline-none"
+                        />
+                      ) : (
+                        <span
+                          className={`flex-1 text-[17px] leading-snug ${
+                            st.done ? "text-muted-foreground line-through" : ""
+                          }`}
+                        >
+                          {st.text}
+                        </span>
+                      )}
+                      {editing && (
+                        <Reorder
+                          first={si === 0}
+                          last={si === f.steps.length - 1}
+                          onMove={(dir) =>
+                            updateProjectFolder(project.id, f.id, (x) => ({
+                              ...x,
+                              steps: move(x.steps, si, si + dir),
+                            }))
+                          }
+                        />
+                      )}
+                      {editing && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateProjectFolder(project.id, f.id, (x) => ({
+                              ...x,
+                              steps: x.steps.filter((y) => y.id !== st.id),
+                            }))
+                          }
+                          aria-label="Eliminar paso"
+                          className="text-muted-foreground"
+                        >
+                          <Trash2 size={16} strokeWidth={1.75} />
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                  {f.steps.length === 0 && (
+                    <li className="text-[15px] text-muted-foreground">Sin pasos. Usa el +.</li>
+                  )}
+                </ul>
+              )}
+            </div>
+          ))}
+          {ready && project.folders.length === 0 && (
+            <p className="py-6 text-[16px] text-muted-foreground">Sin carpetas. Agrega una abajo.</p>
+          )}
+        </div>
       ) : tab === "write" ? (
         (
           <ul className="mt-2 flex-1 divide-y divide-border">
             {store.notebooks.map((n, ni) => (
               <li key={n.id} className="flex items-center gap-3 py-3">
-                <PenLine size={18} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+                <NotebookIcon size={18} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
                 {editing ? (
                   <input
                     value={n.name}
@@ -995,7 +1231,7 @@ export default function App() {
         </ul>
       )}
 
-      {!inHabit && !inNotebook && tab !== "read" && (
+      {!inHabit && !inNotebook && (
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -1008,12 +1244,16 @@ export default function App() {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder={
-              inFolderList
-                ? "Nueva carpeta…"
-                : inFolder
-                  ? "Nuevo ejercicio…"
-                  : tab === "habits"
-                    ? "Nuevo hábito…"
+              inProjectList
+                ? "Nuevo proyecto…"
+                : inProject
+                  ? "Nueva carpeta…"
+                  : inFolderList
+                    ? "Nueva carpeta…"
+                    : inFolder
+                      ? "Nuevo ejercicio…"
+                      : tab === "habits"
+                        ? "Nuevo hábito…"
                     : "Agregar…"
             }
             className="w-full bg-transparent py-2 text-[17px] outline-none placeholder:text-muted-foreground"
