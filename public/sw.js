@@ -32,24 +32,39 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 
+  // Para páginas: siempre intentar obtener la versión nueva
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request, { cache: "no-store" })
+        .then((response) => {
+          const copy = response.clone();
+
+          caches.open(CACHE).then((cache) => {
+            cache.put("./index.html", copy);
+          });
+
+          return response;
+        })
+        .catch(() => caches.match("./index.html"))
+    );
+
+    return;
+  }
+
+  // Para el resto de archivos
   event.respondWith(
     fetch(event.request)
       .then((response) => {
         if (response.ok) {
           const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+
+          caches.open(CACHE).then((cache) => {
+            cache.put(event.request, copy);
+          });
         }
+
         return response;
       })
-      .catch(async () => {
-        const cached = await caches.match(event.request);
-        if (cached) return cached;
-
-        if (event.request.mode === "navigate") {
-          return caches.match("./index.html");
-        }
-
-        throw new Error("Offline resource not cached");
-      })
+      .catch(() => caches.match(event.request))
   );
 });
