@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronUp,
@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import Writer from "@/components/Writer";
+import { syncX3, type X3SyncStatus } from "@/lib/x3-sync";
 import type { Notebook, ReaderSettings } from "@/lib/library-types";
 
 type Item = { id: string; text: string; done: boolean; rid?: string };
@@ -371,6 +372,11 @@ export default function App() {
   const [recurYear, setRecurYear] = useState<string[]>([]);
   const [yearMonth, setYearMonth] = useState(new Date().getMonth());
   const inputRef = useRef<HTMLInputElement>(null);
+  const [x3Message, setX3Message] = useState<string | null>(null);
+  const x3MessageTimerRef = useRef<number | null>(null);
+  const starPressTimerRef = useRef<number | null>(null);
+  const starPressStartRef = useRef<{ x: number; y: number } | null>(null);
+  const starLongPressFiredRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -399,6 +405,43 @@ export default function App() {
     const id = setInterval(() => setStore((s) => applyRecurring(purge(s))), 60_000);
     return () => clearInterval(id);
   }, [ready]);
+
+  const showX3Message = useCallback((message: string, autoHideMs = 0) => {
+    if (x3MessageTimerRef.current !== null) {
+      window.clearTimeout(x3MessageTimerRef.current);
+      x3MessageTimerRef.current = null;
+    }
+    setX3Message(message);
+    if (autoHideMs > 0) {
+      x3MessageTimerRef.current = window.setTimeout(() => {
+        setX3Message(null);
+        x3MessageTimerRef.current = null;
+      }, autoHideMs);
+    }
+  }, []);
+
+  const handleX3Sync = useCallback(async () => {
+    try {
+      const result = await syncX3(store, {
+        dark,
+        onStatus: (status: X3SyncStatus) =>
+          showX3Message(status, status === "X3 actualizado ✓" ? 2200 : 0),
+      });
+      // Los cambios hechos offline en el X3 se aplican a Maple únicamente
+      // después de que el X3 haya aceptado el nuevo estado completo.
+      setStore(result.store as Store);
+    } catch (error) {
+      console.error("Maple X3 sync failed", error);
+      showX3Message("No se pudo conectar con Maple X3", 3200);
+    }
+  }, [dark, showX3Message, store]);
+
+  useEffect(() =>
+    () => {
+      if (x3MessageTimerRef.current !== null) window.clearTimeout(x3MessageTimerRef.current);
+      if (starPressTimerRef.current !== null) window.clearTimeout(starPressTimerRef.current);
+    },
+  []);
 
 
   const today = useMemo(() => {
@@ -625,16 +668,66 @@ export default function App() {
     setOpenGrimorio(false);
   };
 
+  const clearStarPressTimer = () => {
+    if (starPressTimerRef.current !== null) {
+      window.clearTimeout(starPressTimerRef.current);
+      starPressTimerRef.current = null;
+    }
+  };
+
+  const handleStarPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    clearStarPressTimer();
+    starLongPressFiredRef.current = false;
+    starPressStartRef.current = { x: event.clientX, y: event.clientY };
+    starPressTimerRef.current = window.setTimeout(() => {
+      starPressTimerRef.current = null;
+      starLongPressFiredRef.current = true;
+      if (typeof navigator.vibrate === "function") navigator.vibrate(25);
+      void handleX3Sync();
+    }, 800);
+  };
+
+  const handleStarPointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const start = starPressStartRef.current;
+    if (!start) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (dx * dx + dy * dy > 144) {
+      clearStarPressTimer();
+      starPressStartRef.current = null;
+    }
+  };
+
+  const handleStarPointerEnd = () => {
+    clearStarPressTimer();
+    starPressStartRef.current = null;
+  };
+
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-background px-3 pb-6 pt-3 text-foreground">
       {/* Estrella del norte — pestaña Hoy, centrada arriba de las demás */}
       <div className="flex justify-center">
         <button
           type="button"
-          onClick={() => goTab("today")}
+          onClick={(event) => {
+            if (starLongPressFiredRef.current) {
+              starLongPressFiredRef.current = false;
+              event.preventDefault();
+              event.stopPropagation();
+              return;
+            }
+            goTab("today");
+          }}
+          onPointerDown={handleStarPointerDown}
+          onPointerMove={handleStarPointerMove}
+          onPointerUp={handleStarPointerEnd}
+          onPointerCancel={handleStarPointerEnd}
+          onPointerLeave={handleStarPointerEnd}
+          onContextMenu={(event) => event.preventDefault()}
           aria-pressed={tab === "today"}
-          aria-label="Hoy"
-          className={`flex items-center justify-center rounded-full border size-14 ${
+          aria-label="Hoy. Mantén pulsado para sincronizar Maple X3"
+          title="Mantén pulsado para sincronizar Maple X3"
+          className={`flex size-14 select-none items-center justify-center rounded-full border touch-manipulation ${
             tab === "today"
               ? "border-foreground bg-foreground text-background"
               : "border-border text-muted-foreground"
@@ -1720,6 +1813,16 @@ export default function App() {
       <p className="mt-3 text-[12px] uppercase tracking-widest text-muted-foreground">
         Las tareas completadas se borran a las 2:00 am
       </p>
+      {x3Message && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 whitespace-nowrap rounded-md border border-foreground bg-background px-4 py-2 text-[14px] shadow-sm"
+        >
+          {x3Message}
+        </div>
+      )}
+
     </main>
   );
 }
