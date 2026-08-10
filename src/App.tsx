@@ -832,8 +832,6 @@ export default function App() {
             </ul>
           </section>
 
-          
-
           <section>
             <p className="text-[13px] tracking-widest text-muted-foreground">
               {store.labels.projects}
@@ -1021,10 +1019,8 @@ export default function App() {
                             ),
                           }))
                         }
-                        className={`flex size-6 shrink-0 items-center justify-center rounded border ${
-                          st.done
-                            ? "border-foreground bg-foreground text-background"
-                            : "border-border"
+                        className={`flex size-6 shrink-0 items-center justify-center rounded-sm border border-foreground ${
+                          st.done ? "bg-foreground text-background" : ""
                         }`}
                       >
                         {st.done && <Check size={14} strokeWidth={3} />}
@@ -1287,8 +1283,8 @@ export default function App() {
                             marks: { ...x.marks, [k]: !x.marks[k] },
                           }))
                         }
-                        className={`flex size-7 items-center justify-center rounded border ${
-                          on ? "border-foreground bg-foreground text-background" : "border-border"
+                        className={`flex size-6 items-center justify-center rounded-sm border border-foreground ${
+                          on ? "bg-foreground text-background" : ""
                         } ${isToday ? "" : "opacity-40"}`}
                       >
                         {on && <Check size={13} strokeWidth={3} />}
@@ -1432,10 +1428,8 @@ export default function App() {
                               }),
                             }))
                           }
-                          className={`flex size-7 items-center justify-center rounded border ${
-                            on
-                              ? "border-foreground bg-foreground text-background"
-                              : "border-border"
+                          className={`flex size-6 items-center justify-center rounded-sm border border-foreground ${
+                            on ? "bg-foreground text-background" : ""
                           }`}
                         >
                           {on && <Check size={13} strokeWidth={3} />}
@@ -1488,8 +1482,8 @@ export default function App() {
                 type="button"
                 onClick={() => toggleTask(item.id)}
                 aria-label={item.done ? "Marcar como pendiente" : "Marcar como completa"}
-                className={`flex size-6 shrink-0 items-center justify-center rounded border ${
-                  item.done ? "border-foreground bg-foreground text-background" : "border-border"
+                className={`flex size-6 shrink-0 items-center justify-center rounded-sm border border-foreground ${
+                  item.done ? "bg-foreground text-background" : ""
                 }`}
               >
                 {item.done && <Check size={14} strokeWidth={3} />}
