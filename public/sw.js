@@ -1,4 +1,4 @@
-const CACHE = "maple-offline-v5-2";
+const CACHE = "maple-offline-v7";
 
 const CORE = [
   "./",
@@ -18,7 +18,9 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
       .then((keys) =>
-        Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))
+        Promise.all(
+          keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))
+        )
       )
       .then(() => self.clients.claim())
   );
