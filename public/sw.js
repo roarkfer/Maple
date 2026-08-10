@@ -1,4 +1,4 @@
-const CACHE = "maple-offline-v7";
+const CACHE = "maple-offline-v7-1";
 
 const CORE = [
   "./",
