@@ -1,33 +1,36 @@
-# Maple v5.2 Offline
+# Maple v6 Offline
 
-Versión independiente de Lovable/TanStack Start de la Maple v5.2 definitiva.
+Versión independiente de Lovable de Maple v6.
 
-## Conserva v5.2
-- Tareas, hábitos y ejercicios.
-- Biblioteca EPUB.
-- Cambio de página por swipe horizontal.
-- Modo página y modo scroll.
-- Botones/teclas de volumen compatibles cuando el navegador/Android los expone como eventos.
-- Diccionarios StarDict agregados por el usuario (`.idx` + `.dict` / `.dict.dz`).
-- Libretas y escritura.
-- Exportación de libretas a TXT local.
-- Modo oscuro.
-- Datos existentes en `kompakt-lists-v1`.
+## Qué cambió
+- Se eliminó TanStack Start y `@lovable.dev/vite-tanstack-config`.
+- Se eliminó el reporte de errores de Lovable.
+- La app ahora es React + Vite puro.
+- Conserva la clave `kompakt-lists-v1`, por lo que mantiene compatibilidad con los datos locales de Maple anteriores cuando se usa en el mismo origen/navegador.
+- La descarga de libretas crea el `.txt` directamente en el dispositivo, sin navegar a una ruta de servidor.
+- El build genera un Service Worker que precarga todos los archivos estáticos de Maple.
+- `manifest.webmanifest`, rutas e iconos usan rutas relativas para funcionar en GitHub Pages o en subcarpetas.
 
-## Offline
-No hay llamadas a Lovable, Wikcionario ni APIs externas durante el uso.
-Los EPUB, portadas, fuentes y diccionarios siguen guardándose en IndexedDB.
+## Ejecutar localmente
+```bash
+npm install
+npm run dev
+```
 
-Si una Maple anterior ya dejó un DRAE empaquetado en IndexedDB bajo `drae:idx` y `drae:dict`,
-v5.2 lo reutiliza sin descargar nada. Si no existe, usa los diccionarios StarDict que agregues.
+## Compilar
+```bash
+npm run build
+```
 
-El Service Worker usa `maple-offline-v5-2`.
+La versión final queda en `dist/`.
+
+## Probar offline
+1. Publica `dist/` en HTTPS (por ejemplo GitHub Pages).
+2. Abre Maple una vez con internet.
+3. Espera unos segundos y vuelve a abrirla.
+4. Activa modo avión: Maple seguirá cargando.
 
 ## GitHub Pages
-1. Reemplaza el proyecto de tu repositorio Maple con estos archivos.
-2. Deja **Settings → Pages → Source → GitHub Actions**.
-3. El workflow **Build and deploy Maple v5.2** compila y publica el contenido de `dist`.
-4. Abre Maple una vez con internet tras el deploy para instalar el nuevo Service Worker.
-5. Después prueba en modo avión.
+Este proyecto incluye `.github/workflows/deploy.yml`.
 
-No borres los datos de Safari/PWA si quieres conservar tus datos locales.
+En GitHub configura **Settings → Pages → Source → GitHub Actions**. Después, cada push a `main` compilará y publicará Maple automáticamente.
