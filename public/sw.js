@@ -1,4 +1,4 @@
-const CACHE = "maple-offline-v7-5-1";
+const CACHE = "maple-offline-v7-5-2-x3";
 const CORE = ["./", "./index.html", "./manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
