@@ -832,33 +832,7 @@ export default function App() {
             </ul>
           </section>
 
-          <section>
-            <p className="text-[13px] tracking-widest text-muted-foreground">
-              {store.labels.exercises}
-            </p>
-            <ul className="divide-y divide-border">
-              {store.folders.flatMap((f) =>
-                f.exercises
-                  .filter((x) => (x.done ?? []).filter(Boolean).length < x.sets)
-                  .map((x) => (
-                    <li key={x.id} className="flex items-center gap-2 py-2 text-[16px]">
-                      <Dumbbell
-                        size={16}
-                        strokeWidth={1.75}
-                        className="shrink-0 text-muted-foreground"
-                      />
-                      <span className="flex-1 truncate">{x.name}</span>
-                      <span className="text-[14px] text-muted-foreground">
-                        {(x.done ?? []).filter(Boolean).length}/{x.sets} · {f.name}
-                      </span>
-                    </li>
-                  )),
-              )}
-              {store.folders.every((f) =>
-                f.exercises.every((x) => (x.done ?? []).filter(Boolean).length >= x.sets),
-              ) && <li className="py-2 text-[15px] text-muted-foreground">Sin sets pendientes.</li>}
-            </ul>
-          </section>
+          
 
           <section>
             <p className="text-[13px] tracking-widest text-muted-foreground">
