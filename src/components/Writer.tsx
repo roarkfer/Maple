@@ -9,43 +9,36 @@ type Props = {
   onBack: () => void;
 };
 
+function safeFilename(name: string) {
+  return (name.trim() || "nota")
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, " ")
+    .slice(0, 120);
+}
+
 export default function Writer({ notebook, settings, onChange, onBack }: Props) {
   const [text, setText] = useState(notebook.text);
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => setText(notebook.text), [notebook.id]);
+  useEffect(() => setText(notebook.text), [notebook.id, notebook.text]);
 
   const save = () => {
     onChange(text);
     setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
+    window.setTimeout(() => setSaved(false), 1500);
   };
 
-  const openExportPage = async () => {
+  const downloadTxt = () => {
     onChange(text);
-    const safeName = notebook.name.replace(/[^\\w\\-áéíóúñü ]/gi, "").trim() || "libreta";
-    const file = new File([text], `${safeName}.txt`, { type: "text/plain;charset=utf-8" });
-
-    if (
-      typeof navigator.share === "function" &&
-      (typeof navigator.canShare !== "function" || navigator.canShare({ files: [file] }))
-    ) {
-      try {
-        await navigator.share({ files: [file], title: file.name });
-        return;
-      } catch (error) {
-        if ((error as DOMException)?.name === "AbortError") return;
-      }
-    }
-
-    const url = URL.createObjectURL(file);
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = file.name;
+    a.download = `${safeFilename(notebook.name)}.txt`;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -65,7 +58,7 @@ export default function Writer({ notebook, settings, onChange, onBack }: Props) 
         <span className="flex-1 truncate text-[13px] text-muted-foreground">{notebook.name}</span>
         <button
           type="button"
-          onClick={openExportPage}
+          onClick={downloadTxt}
           className="flex items-center gap-1 rounded-md border border-border px-3 py-2 text-[14px] active:scale-95"
         >
           <Download size={15} strokeWidth={1.8} /> Descargar
@@ -87,7 +80,6 @@ export default function Writer({ notebook, settings, onChange, onBack }: Props) 
         style={{ fontSize: settings.fontSize, lineHeight: 1.6 }}
         className="w-full flex-1 resize-none bg-transparent px-4 pb-6 outline-none placeholder:text-muted-foreground"
       />
-
     </div>
   );
 }
