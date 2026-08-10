@@ -1,36 +1,33 @@
-# Maple v6 Offline
+# Maple v7 Offline
 
-Versión independiente de Lovable de Maple v6.
+Versión autónoma de Maple v7 preparada para GitHub Pages/PWA.
 
-## Qué cambió
-- Se eliminó TanStack Start y `@lovable.dev/vite-tanstack-config`.
-- Se eliminó el reporte de errores de Lovable.
-- La app ahora es React + Vite puro.
-- Conserva la clave `kompakt-lists-v1`, por lo que mantiene compatibilidad con los datos locales de Maple anteriores cuando se usa en el mismo origen/navegador.
-- La descarga de libretas crea el `.txt` directamente en el dispositivo, sin navegar a una ruta de servidor.
-- El build genera un Service Worker que precarga todos los archivos estáticos de Maple.
-- `manifest.webmanifest`, rutas e iconos usan rutas relativas para funcionar en GitHub Pages o en subcarpetas.
+## Incluye
+- Hábitos
+- Tareas
+- Ejercicios
+- Proyectos
+- Escribir / libretas
+- Modo oscuro
+- PWA offline
 
-## Ejecutar localmente
-```bash
-npm install
-npm run dev
-```
+## Independencia
+- Sin Lovable.
+- Sin `@lovable.dev/vite-tanstack-config`.
+- Sin TanStack Start, Router o React Query.
+- Sin APIs externas necesarias para funcionar.
+- La exportación de libretas se hace como TXT local/compartible.
+- Conserva `kompakt-lists-v1`, por lo que al publicarla en el mismo origen mantiene los datos existentes.
 
-## Compilar
-```bash
-npm run build
-```
-
-La versión final queda en `dist/`.
-
-## Probar offline
-1. Publica `dist/` en HTTPS (por ejemplo GitHub Pages).
-2. Abre Maple una vez con internet.
-3. Espera unos segundos y vuelve a abrirla.
-4. Activa modo avión: Maple seguirá cargando.
+## Offline
+El Service Worker usa el caché `maple-offline-v7`.
+Después de abrir la nueva versión una vez con internet, puede iniciar sin conexión.
 
 ## GitHub Pages
-Este proyecto incluye `.github/workflows/deploy.yml`.
+1. Reemplaza los archivos del proyecto por los de este ZIP.
+2. Deja **Settings → Pages → Source → GitHub Actions**.
+3. El workflow `Build and deploy Maple v7` compila y publica `dist`.
+4. Abre Maple una vez con internet después del deploy.
+5. Prueba en modo avión.
 
-En GitHub configura **Settings → Pages → Source → GitHub Actions**. Después, cada push a `main` compilará y publicará Maple automáticamente.
+No borres los datos del navegador/PWA si quieres conservar tus datos locales.
