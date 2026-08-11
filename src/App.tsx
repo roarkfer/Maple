@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import Writer from "@/components/Writer";
+import Stepper from "@/components/Stepper";
 import { syncX3, type X3SyncStatus } from "@/lib/x3-sync";
 import type { Notebook, ReaderSettings } from "@/lib/library-types";
 
