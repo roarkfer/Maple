@@ -222,13 +222,7 @@ function migrate(raw: unknown): Store {
 }
 
 
-function Stepper({
-  value,
-  onChange,
-  min = 0,
-  step = 1,
-  label,
-}: {
+
   value: number;
   onChange: (v: number) => void;
   min?: number;
