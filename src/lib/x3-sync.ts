@@ -106,12 +106,15 @@ async function fetchWithTimeout(
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, {
+    const localRequestInit = {
       ...init,
       mode: "cors",
       cache: "no-store",
       signal: controller.signal,
-    });
+      targetAddressSpace: "local",
+    } as RequestInit & { targetAddressSpace: "local" };
+
+    return await fetch(url, localRequestInit);
   } finally {
     window.clearTimeout(timer);
   }
