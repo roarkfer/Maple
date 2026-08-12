@@ -43,7 +43,8 @@ type FolderT = { id: string; name: string; exercises: Exercise[] };
 
 type Step = { id: string; text: string; done: boolean };
 type ProjectFolder = { id: string; name: string; collapsed: boolean; steps: Step[] };
-type Project = { id: string; name: string; folders: ProjectFolder[] };
+type Meta = { id: string; name: string };
+type Project = { id: string; name: string; folders: ProjectFolder[]; metaId?: string };
 
 type Freq = "daily" | "weekly" | "monthly" | "yearly";
 type Rule = {
@@ -61,6 +62,7 @@ type Store = {
   tasks: Item[];
   habits: Habit[];
   folders: FolderT[];
+  metas: Meta[];
   projects: Project[];
   notebooks: Notebook[];
   recurring: Rule[];
@@ -82,6 +84,7 @@ const DEFAULT_STORE: Store = {
   tasks: [],
   habits: [],
   folders: [],
+  metas: [],
   projects: [],
   notebooks: [],
   recurring: [],
@@ -184,12 +187,38 @@ function applyRecurring(store: Store, now = new Date()): Store {
 
 
 function migrate(raw: unknown): Store {
-  const parsed = { ...DEFAULT_STORE, ...(raw as Partial<Store> & { lists?: any }) };
-  const legacy = (raw as any)?.lists;
+  const source = raw as Partial<Store> & { lists?: any };
+  const parsed = { ...DEFAULT_STORE, ...source };
+  const legacy = source?.lists;
   const tasks: Item[] = parsed.tasks?.length ? parsed.tasks : (legacy?.tasks ?? []);
   const habits: Habit[] = parsed.habits?.length
     ? parsed.habits
     : ((legacy?.habits ?? []) as Item[]).map((i) => ({ id: i.id, name: i.text, marks: {} }));
+
+  const metas: Meta[] = Array.isArray(source?.metas)
+    ? source.metas.map((m) => ({ id: m.id || nextId(), name: m.name || "Meta" }))
+    : [];
+
+  let projects: Project[] = (parsed.projects ?? []).map((p) => ({
+    ...p,
+    folders: (p.folders ?? []).map((f) => ({
+      ...f,
+      collapsed: !!f.collapsed,
+      steps: f.steps ?? [],
+    })),
+  }));
+
+  // Conserva proyectos creados antes de existir el nivel "Meta".
+  if (projects.length > 0 && metas.length === 0) {
+    metas.push({ id: "meta-general", name: "General" });
+  }
+  const validMetaIds = new Set(metas.map((m) => m.id));
+  const fallbackMetaId = metas[0]?.id;
+  projects = projects.map((p) => ({
+    ...p,
+    metaId: p.metaId && validMetaIds.has(p.metaId) ? p.metaId : fallbackMetaId,
+  }));
+
   return {
     labels: (() => {
       const l = { ...DEFAULT_STORE.labels, ...(parsed.labels ?? {}) } as Record<ListKey, string>;
@@ -200,10 +229,8 @@ function migrate(raw: unknown): Store {
     tasks,
     habits: habits.map((h) => ({ ...h, marks: h.marks ?? {} })),
     folders: parsed.folders ?? [],
-    projects: (parsed.projects ?? []).map((p) => ({
-      ...p,
-      folders: (p.folders ?? []).map((f) => ({ ...f, collapsed: !!f.collapsed, steps: f.steps ?? [] })),
-    })),
+    metas,
+    projects,
     notebooks: (parsed.notebooks ?? []).map((n) => ({ ...n, tags: n.tags ?? [] })),
     recurring: (parsed.recurring ?? []).map((r) => ({
       ...r,
@@ -212,10 +239,8 @@ function migrate(raw: unknown): Store {
       yeardays: r.yeardays ?? [],
       lastApplied: r.lastApplied ?? "",
     })),
-
     reader: { ...DEFAULT_STORE.reader, ...(parsed.reader ?? {}) },
     lastPurge: parsed.lastPurge ?? 0,
-
   };
 }
 
@@ -419,6 +444,23 @@ function projectPct(p: Project) {
   return Math.round((steps.filter((s) => s.done).length / steps.length) * 100);
 }
 
+function metaPct(metaId: string, projects: Project[]) {
+  const steps = projects
+    .filter((p) => p.metaId === metaId)
+    .flatMap((p) => p.folders)
+    .flatMap((f) => f.steps);
+  if (steps.length === 0) return 0;
+  return Math.round((steps.filter((s) => s.done).length / steps.length) * 100);
+}
+
+function moveProjectWithinMeta(projects: Project[], metaId: string, from: number, to: number) {
+  const subset = projects.filter((p) => p.metaId === metaId);
+  const moved = move(subset, from, to);
+  if (moved === subset) return projects;
+  let i = 0;
+  return projects.map((p) => (p.metaId === metaId ? moved[i++]! : p));
+}
+
 const EXPORT_PARTS = [
   { key: "habits" as const, label: "Hábitos" },
   { key: "tasks" as const, label: "Tareas" },
@@ -476,14 +518,44 @@ function mergeStore(s: Store, data: Partial<Store>): Store {
     next.folders = folders;
   }
 
+  const incomingMetaMap = new Map<string, string>();
+  if (Array.isArray(data.metas)) {
+    const metas = [...s.metas];
+    for (const m of data.metas) {
+      const i = metas.findIndex((x) => x.name.trim() === m.name.trim());
+      if (i === -1) {
+        const id = nextId();
+        metas.push({ ...m, id });
+        incomingMetaMap.set(m.id, id);
+      } else {
+        incomingMetaMap.set(m.id, metas[i]!.id);
+      }
+    }
+    next.metas = metas;
+  }
+
   if (Array.isArray(data.projects)) {
+    let metas = [...next.metas];
+    const ensureImportedMeta = () => {
+      const existing = metas.find((m) => m.name.trim().toLocaleLowerCase("es") === "importados");
+      if (existing) return existing.id;
+      const id = nextId();
+      metas.push({ id, name: "Importados" });
+      return id;
+    };
+
     const projects = [...s.projects];
     for (const p of data.projects) {
+      const mappedMetaId =
+        (p.metaId ? incomingMetaMap.get(p.metaId) : undefined) ??
+        (p.metaId && metas.some((m) => m.id === p.metaId) ? p.metaId : undefined);
+
       const i = projects.findIndex((x) => x.name.trim() === p.name.trim());
       if (i === -1) {
         projects.push({
           ...p,
           id: nextId(),
+          metaId: mappedMetaId ?? ensureImportedMeta(),
           folders: p.folders.map((f) => ({
             ...f,
             id: nextId(),
@@ -509,8 +581,13 @@ function mergeStore(s: Store, data: Partial<Store>): Store {
         }
         pfolders[j] = { ...curF, steps };
       }
-      projects[i] = { ...cur, folders: pfolders };
+      projects[i] = {
+        ...cur,
+        metaId: cur.metaId ?? mappedMetaId ?? ensureImportedMeta(),
+        folders: pfolders,
+      };
     }
+    next.metas = metas;
     next.projects = projects;
   }
 
@@ -551,6 +628,7 @@ export default function App() {
   const [openFolder, setOpenFolder] = useState<string | null>(null);
   const [openHabit, setOpenHabit] = useState<string | null>(null);
   const [openNotebook, setOpenNotebook] = useState<string | null>(null);
+  const [openMeta, setOpenMeta] = useState<string | null>(null);
   const [openProject, setOpenProject] = useState<string | null>(null);
   const [dark, setDark] = useState(false);
   const [openGrimorio, setOpenGrimorio] = useState(false);
@@ -584,7 +662,10 @@ export default function App() {
       payload['recurring'] = store.recurring;
     }
     if (sel.exercises) payload['folders'] = store.folders;
-    if (sel.projects) payload['projects'] = store.projects;
+    if (sel.projects) {
+      payload['metas'] = store.metas;
+      payload['projects'] = store.projects;
+    }
     if (sel.write) payload['notebooks'] = store.notebooks;
 
 
@@ -680,15 +761,18 @@ export default function App() {
   const folder = store.folders.find((f) => f.id === openFolder) ?? null;
   const habit = store.habits.find((h) => h.id === openHabit) ?? null;
   const notebook = store.notebooks.find((n) => n.id === openNotebook) ?? null;
-  const project = store.projects.find((p) => p.id === openProject) ?? null;
+  const meta = store.metas.find((m) => m.id === openMeta) ?? null;
+  const project =
+    store.projects.find((p) => p.id === openProject && (!meta || p.metaId === meta.id)) ?? null;
 
   const inFolder = tab === "exercises" && folder !== null;
   const inFolderList = tab === "exercises" && folder === null;
   const inHabit = tab === "habits" && habit !== null;
   const inNotebook = tab === "write" && notebook !== null;
   const inGrimorio = tab === "write" && openGrimorio && !inNotebook;
+  const inMetaList = tab === "projects" && meta === null;
+  const inProjectList = tab === "projects" && meta !== null && project === null;
   const inProject = tab === "projects" && project !== null;
-  const inProjectList = tab === "projects" && project === null;
 
   const allTags = useMemo(() => {
     const set = new Set<string>();
@@ -728,6 +812,12 @@ export default function App() {
   const updateFolder = useCallback(
     (id: string, fn: (f: FolderT) => FolderT) =>
       setStore((s) => ({ ...s, folders: s.folders.map((f) => (f.id === id ? fn(f) : f)) })),
+    [],
+  );
+
+  const updateMeta = useCallback(
+    (id: string, fn: (m: Meta) => Meta) =>
+      setStore((s) => ({ ...s, metas: s.metas.map((m) => (m.id === id ? fn(m) : m)) })),
     [],
   );
 
@@ -779,10 +869,15 @@ export default function App() {
       }));
     } else if (tab === "habits") {
       setStore((s) => ({ ...s, habits: [...s.habits, { id: nextId(), name: text, marks: {} }] }));
-    } else if (inProjectList) {
+    } else if (inMetaList) {
       setStore((s) => ({
         ...s,
-        projects: [...s.projects, { id: nextId(), name: text, folders: [] }],
+        metas: [...s.metas, { id: nextId(), name: text }],
+      }));
+    } else if (inProjectList && meta) {
+      setStore((s) => ({
+        ...s,
+        projects: [...s.projects, { id: nextId(), name: text, metaId: meta.id, folders: [] }],
       }));
     } else if (inProject && project) {
       updateProject(project.id, (p) => ({
@@ -829,8 +924,10 @@ export default function App() {
     inFolder,
     inFolderList,
     inHabit,
+    inMetaList,
     inProject,
     inProjectList,
+    meta,
     project,
     folder,
     updateFolder,
@@ -886,6 +983,7 @@ export default function App() {
     setOpenFolder(null);
     setOpenHabit(null);
     setOpenNotebook(null);
+    setOpenMeta(null);
     setOpenProject(null);
     setOpenGrimorio(false);
   };
@@ -1105,14 +1203,21 @@ export default function App() {
       )}
 
       <div className="mt-4 flex items-center gap-2">
-        {(inFolder || inHabit || inNotebook || inProject || inGrimorio) && (
+        {(inFolder || inHabit || inNotebook || inProjectList || inProject || inGrimorio) && (
           <button
             type="button"
             onClick={() => {
+              if (inProject) {
+                setOpenProject(null);
+                return;
+              }
+              if (inProjectList) {
+                setOpenMeta(null);
+                return;
+              }
               setOpenFolder(null);
               setOpenHabit(null);
               setOpenNotebook(null);
-              setOpenProject(null);
               setOpenGrimorio(false);
             }}
             aria-label="Volver"
@@ -1128,13 +1233,17 @@ export default function App() {
               ? habit.name
               : inProject && project
                 ? project.name
-                : inNotebook && notebook
-                  ? notebook.name
-                  : inGrimorio
-                    ? "Grimorio"
-                    : tab === "today"
-                      ? "Hoy"
-                      : store.labels[tab]}
+                : inProjectList && meta
+                  ? meta.name
+                  : inNotebook && notebook
+                    ? notebook.name
+                    : inGrimorio
+                      ? "Grimorio"
+                      : tab === "today"
+                        ? "Hoy"
+                        : inMetaList
+                          ? "Metas"
+                          : store.labels[tab]}
         </h1>
 
       </div>
@@ -1228,32 +1337,32 @@ export default function App() {
             </ul>
           </section>
         </div>
-      ) : inProjectList ? (
-
+      ) : inMetaList ? (
         <ul className="mt-2 flex-1 divide-y divide-border">
-          {store.projects.map((p, pi) => {
-            const pct = projectPct(p);
+          {store.metas.map((m, mi) => {
+            const pct = metaPct(m.id, store.projects);
+            const count = store.projects.filter((p) => p.metaId === m.id).length;
             return (
-              <li key={p.id} className="flex items-center gap-3 py-3">
-                <Hammer size={18} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+              <li key={m.id} className="flex items-center gap-3 py-3">
+                <ListTree size={18} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
                 {editing ? (
                   <input
-                    value={p.name}
-                    onChange={(e) => updateProject(p.id, (x) => ({ ...x, name: e.target.value }))}
+                    value={m.name}
+                    onChange={(e) => updateMeta(m.id, (x) => ({ ...x, name: e.target.value }))}
                     className="flex-1 bg-transparent py-1 text-[17px] outline-none"
                   />
                 ) : (
                   <button
                     type="button"
-                    onClick={() => setOpenProject(p.id)}
+                    onClick={() => setOpenMeta(m.id)}
                     className="flex-1 text-left text-[17px] leading-snug"
                   >
-                    {p.name}
+                    {m.name}
                   </button>
                 )}
                 <span className="w-24 shrink-0">
                   <span className="block text-right text-[13px] tabular-nums text-muted-foreground">
-                    {pct}%
+                    {count} · {pct}%
                   </span>
                   <span className="mt-1 block h-1.5 w-full overflow-hidden rounded-full border border-border">
                     <span
@@ -1264,10 +1373,10 @@ export default function App() {
                 </span>
                 {editing && (
                   <Reorder
-                    first={pi === 0}
-                    last={pi === store.projects.length - 1}
+                    first={mi === 0}
+                    last={mi === store.metas.length - 1}
                     onMove={(dir) =>
-                      setStore((s) => ({ ...s, projects: move(s.projects, pi, pi + dir) }))
+                      setStore((s) => ({ ...s, metas: move(s.metas, mi, mi + dir) }))
                     }
                   />
                 )}
@@ -1275,9 +1384,13 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() =>
-                      setStore((s) => ({ ...s, projects: s.projects.filter((x) => x.id !== p.id) }))
+                      setStore((s) => ({
+                        ...s,
+                        metas: s.metas.filter((x) => x.id !== m.id),
+                        projects: s.projects.filter((p) => p.metaId !== m.id),
+                      }))
                     }
-                    aria-label="Eliminar proyecto"
+                    aria-label="Eliminar meta"
                     className="text-muted-foreground"
                   >
                     <Trash2 size={16} strokeWidth={1.75} />
@@ -1286,7 +1399,78 @@ export default function App() {
               </li>
             );
           })}
-          {ready && store.projects.length === 0 && (
+          {ready && store.metas.length === 0 && (
+            <li className="py-6 text-[16px] text-muted-foreground">
+              Sin metas. Agrega una abajo.
+            </li>
+          )}
+        </ul>
+      ) : inProjectList && meta ? (
+        <ul className="mt-2 flex-1 divide-y divide-border">
+          {store.projects
+            .filter((p) => p.metaId === meta.id)
+            .map((p, pi, metaProjects) => {
+              const pct = projectPct(p);
+              return (
+                <li key={p.id} className="flex items-center gap-3 py-3">
+                  <Hammer size={18} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+                  {editing ? (
+                    <input
+                      value={p.name}
+                      onChange={(e) => updateProject(p.id, (x) => ({ ...x, name: e.target.value }))}
+                      className="flex-1 bg-transparent py-1 text-[17px] outline-none"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setOpenProject(p.id)}
+                      className="flex-1 text-left text-[17px] leading-snug"
+                    >
+                      {p.name}
+                    </button>
+                  )}
+                  <span className="w-24 shrink-0">
+                    <span className="block text-right text-[13px] tabular-nums text-muted-foreground">
+                      {pct}%
+                    </span>
+                    <span className="mt-1 block h-1.5 w-full overflow-hidden rounded-full border border-border">
+                      <span
+                        className="block h-full bg-foreground"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </span>
+                  </span>
+                  {editing && (
+                    <Reorder
+                      first={pi === 0}
+                      last={pi === metaProjects.length - 1}
+                      onMove={(dir) =>
+                        setStore((s) => ({
+                          ...s,
+                          projects: moveProjectWithinMeta(s.projects, meta.id, pi, pi + dir),
+                        }))
+                      }
+                    />
+                  )}
+                  {editing && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setStore((s) => ({
+                          ...s,
+                          projects: s.projects.filter((x) => x.id !== p.id),
+                        }))
+                      }
+                      aria-label="Eliminar proyecto"
+                      className="text-muted-foreground"
+                    >
+                      <Trash2 size={16} strokeWidth={1.75} />
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          {ready && store.projects.every((p) => p.metaId !== meta.id) && (
             <li className="py-6 text-[16px] text-muted-foreground">
               Sin proyectos. Agrega uno abajo.
             </li>
@@ -2038,10 +2222,12 @@ export default function App() {
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               placeholder={
-                inProjectList
-                  ? "Nuevo proyecto…"
-                  : inProject
-                    ? "Nueva carpeta…"
+                inMetaList
+                  ? "Nueva meta…"
+                  : inProjectList
+                    ? "Nuevo proyecto…"
+                    : inProject
+                      ? "Nueva carpeta…"
                     : inFolderList
                       ? "Nueva carpeta…"
                       : inFolder
