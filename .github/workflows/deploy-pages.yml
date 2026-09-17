@@ -38,6 +38,10 @@ jobs:
           cp sw.js reset.html manifest.webmanifest robots.txt dist/
           cp icon-192.png icon-512.png favicon.png apple-touch-icon.png dist/
 
+      - name: Fix installed app start path
+        run: |
+          sed -E -i 's#\./assets/manifest-[^"]+\.webmanifest#./manifest.webmanifest#g' dist/index.html
+
       - name: Verify deployment files
         run: |
           test -s dist/index.html
@@ -47,6 +51,7 @@ jobs:
           test -s dist/icon-192.png
           test -s dist/icon-512.png
           test -d dist/assets
+          grep -q 'href="./manifest.webmanifest"' dist/index.html
 
       - name: Upload Maple
         uses: actions/upload-pages-artifact@v3
