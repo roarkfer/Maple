@@ -30,6 +30,10 @@ jobs:
 
       - name: Build Maple
         run: npm run build
+              - name: Add offline files
+        run: |
+          cp sw.js reset.html manifest.webmanifest robots.txt dist/
+          cp icon-192.png icon-512.png favicon.png apple-touch-icon.png dist/
 
       - name: Upload Maple
         uses: actions/upload-pages-artifact@v3
