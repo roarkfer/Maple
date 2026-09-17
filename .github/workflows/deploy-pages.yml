@@ -19,21 +19,35 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Download repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Configure Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
+          cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build Maple
         run: npm run build
-              - name: Add offline files
+
+      - name: Add offline PWA files
         run: |
           cp sw.js reset.html manifest.webmanifest robots.txt dist/
           cp icon-192.png icon-512.png favicon.png apple-touch-icon.png dist/
+
+      - name: Verify deployment files
+        run: |
+          test -s dist/index.html
+          test -s dist/export.html
+          test -s dist/sw.js
+          test -s dist/manifest.webmanifest
+          test -s dist/icon-192.png
+          test -s dist/icon-512.png
+          test -d dist/assets
 
       - name: Upload Maple
         uses: actions/upload-pages-artifact@v3
@@ -43,9 +57,11 @@ jobs:
   deploy:
     environment:
       name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     needs: build
 
     steps:
       - name: Deploy Maple
+        id: deployment
         uses: actions/deploy-pages@v4
