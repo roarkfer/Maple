@@ -25,9 +25,10 @@ import {
   X,
 } from "lucide-react";
 import Writer from "@/components/Writer";
-import type { Notebook, ReaderSettings } from "@/lib/library-types";
+import type { Notebook, ReaderSettings } from "@/components/library-types";
 
 type Item = { id: string; text: string; done: boolean; rid?: string };
+type TaskList = { id: string; name: string; tasks: Item[] };
 type ListKey = "habits" | "tasks" | "today" | "exercises" | "projects" | "write";
 
 type Habit = { id: string; name: string; marks: Record<string, boolean> };
@@ -50,6 +51,7 @@ type Freq = "daily" | "weekly" | "monthly" | "yearly";
 type Rule = {
   id: string;
   text: string;
+  listId?: string;
   freq: Freq;
   weekdays: number[]; // 0 = lunes … 6 = domingo
   monthdays: number[]; // 1..31
@@ -59,7 +61,7 @@ type Rule = {
 
 type Store = {
   labels: Record<ListKey, string>;
-  tasks: Item[];
+  taskLists: TaskList[];
   habits: Habit[];
   folders: FolderT[];
   metas: Meta[];
@@ -71,6 +73,7 @@ type Store = {
 };
 
 const STORAGE_KEY = "kompakt-lists-v1";
+const MAIN_TASK_LIST_ID = "task-list-main";
 
 const DEFAULT_STORE: Store = {
   labels: {
@@ -81,7 +84,7 @@ const DEFAULT_STORE: Store = {
     projects: "Proyectos",
     write: "Escribir",
   },
-  tasks: [],
+  taskLists: [{ id: MAIN_TASK_LIST_ID, name: "Tareas", tasks: [] }],
   habits: [],
   folders: [],
   metas: [],
@@ -133,7 +136,14 @@ function lastTwoAm(now: Date) {
 function purge(store: Store, now = new Date()): Store {
   const cutoff = lastTwoAm(now);
   if (store.lastPurge >= cutoff) return store;
-  return { ...store, lastPurge: cutoff, tasks: store.tasks.filter((i) => !i.done) };
+  return {
+    ...store,
+    lastPurge: cutoff,
+    taskLists: store.taskLists.map((list) => ({
+      ...list,
+      tasks: list.tasks.filter((i) => !i.done),
+    })),
+  };
 }
 
 const FREQ_LABELS: Record<Freq, string> = {
@@ -168,11 +178,18 @@ function ruleSlot(rule: Rule, now: Date): string | null {
 
 // Reglas recurrentes: agrega la tarea si falta, la desmarca si ya estaba completada.
 function applyRecurring(store: Store, now = new Date()): Store {
-  let tasks = store.tasks;
+  let taskLists = store.taskLists;
   let changed = false;
   const recurring = store.recurring.map((rule) => {
     const slot = ruleSlot(rule, now);
     if (!slot || rule.lastApplied === slot) return rule;
+    const listId =
+      rule.listId && taskLists.some((list) => list.id === rule.listId)
+        ? rule.listId
+        : taskLists[0]?.id;
+    if (!listId) return rule;
+    const list = taskLists.find((item) => item.id === listId)!;
+    let tasks = list.tasks;
     changed = true;
     const existing = tasks.find((t) => t.rid === rule.id);
     if (!existing) {
@@ -180,17 +197,36 @@ function applyRecurring(store: Store, now = new Date()): Store {
     } else if (existing.done) {
       tasks = tasks.map((t) => (t.rid === rule.id ? { ...t, done: false } : t));
     }
-    return { ...rule, lastApplied: slot };
+    taskLists = taskLists.map((item) => (item.id === listId ? { ...item, tasks } : item));
+    return { ...rule, listId, lastApplied: slot };
   });
-  return changed ? { ...store, tasks, recurring } : store;
+  return changed ? { ...store, taskLists, recurring } : store;
 }
 
 
 function migrate(raw: unknown): Store {
-  const source = raw as Partial<Store> & { lists?: any };
+  const source = raw as Partial<Store> & { tasks?: Item[]; lists?: any };
   const parsed = { ...DEFAULT_STORE, ...source };
   const legacy = source?.lists;
-  const tasks: Item[] = parsed.tasks?.length ? parsed.tasks : (legacy?.tasks ?? []);
+  const legacyTasks: Item[] = Array.isArray(source.tasks)
+    ? source.tasks
+    : Array.isArray(legacy?.tasks)
+      ? legacy.tasks
+      : [];
+  const taskLists: TaskList[] =
+    Array.isArray(source.taskLists) && source.taskLists.length > 0
+      ? source.taskLists.map((list, index) => ({
+          id: list.id || (index === 0 ? MAIN_TASK_LIST_ID : nextId()),
+          name: list.name?.trim() || `Lista ${index + 1}`,
+          tasks: Array.isArray(list.tasks) ? list.tasks : [],
+        }))
+      : [
+          {
+            id: MAIN_TASK_LIST_ID,
+            name: source.labels?.tasks || "Tareas",
+            tasks: legacyTasks,
+          },
+        ];
   const habits: Habit[] = parsed.habits?.length
     ? parsed.habits
     : ((legacy?.habits ?? []) as Item[]).map((i) => ({ id: i.id, name: i.text, marks: {} }));
@@ -214,10 +250,12 @@ function migrate(raw: unknown): Store {
   }
   const validMetaIds = new Set(metas.map((m) => m.id));
   const fallbackMetaId = metas[0]?.id;
-  projects = projects.map((p) => ({
-    ...p,
-    metaId: p.metaId && validMetaIds.has(p.metaId) ? p.metaId : fallbackMetaId,
-  }));
+  projects = projects.map((p) => {
+    const metaId = p.metaId && validMetaIds.has(p.metaId) ? p.metaId : fallbackMetaId;
+    if (metaId) return { ...p, metaId };
+    const { metaId: _metaId, ...withoutMeta } = p;
+    return withoutMeta;
+  });
 
   return {
     labels: (() => {
@@ -226,7 +264,7 @@ function migrate(raw: unknown): Store {
       if (!old || old === "Leer" || old === "Biblioteca") l.projects = "Proyectos";
       return l;
     })(),
-    tasks,
+    taskLists,
     habits: habits.map((h) => ({ ...h, marks: h.marks ?? {} })),
     folders: parsed.folders ?? [],
     metas,
@@ -234,6 +272,7 @@ function migrate(raw: unknown): Store {
     notebooks: (parsed.notebooks ?? []).map((n) => ({ ...n, tags: n.tags ?? [] })),
     recurring: (parsed.recurring ?? []).map((r) => ({
       ...r,
+      listId: taskLists.some((list) => list.id === r.listId) ? r.listId! : taskLists[0]!.id,
       weekdays: r.weekdays ?? [],
       monthdays: r.monthdays ?? [],
       yeardays: r.yeardays ?? [],
@@ -475,17 +514,48 @@ const DARK_KEY = "maple-dark";
 
 // Fusiona un paquete recibido con el estado local: solo agrega o marca,
 // nunca reemplaza ni borra información existente.
-function mergeStore(s: Store, data: Partial<Store>): Store {
+function mergeStore(s: Store, data: Partial<Store> & { tasks?: Item[] }): Store {
   const next: Store = { ...s };
+  const incomingTaskListMap = new Map<string, string>();
 
-  if (Array.isArray(data.tasks)) {
-    const tasks = [...s.tasks];
-    for (const t of data.tasks) {
-      const i = tasks.findIndex((x) => x.text.trim() === t.text.trim());
-      if (i === -1) tasks.push({ ...t, id: nextId() });
-      else if (t.done) tasks[i] = { ...tasks[i]!, done: true };
+  const mergeTasks = (current: Item[], incoming: Item[]) => {
+    const tasks = [...current];
+    for (const task of incoming) {
+      const i = tasks.findIndex((item) => item.text.trim() === task.text.trim());
+      if (i === -1) tasks.push({ ...task, id: nextId() });
+      else if (task.done) tasks[i] = { ...tasks[i]!, done: true };
     }
-    next.tasks = tasks;
+    return tasks;
+  };
+
+  if (Array.isArray(data.taskLists) && data.taskLists.length > 0) {
+    const taskLists = s.taskLists.map((list) => ({ ...list, tasks: [...list.tasks] }));
+    for (const incoming of data.taskLists) {
+      const i = taskLists.findIndex(
+        (list) => list.name.trim().toLocaleLowerCase("es") === incoming.name.trim().toLocaleLowerCase("es"),
+      );
+      if (i === -1) {
+        const id = nextId();
+        taskLists.push({
+          id,
+          name: incoming.name.trim() || `Lista ${taskLists.length + 1}`,
+          tasks: (incoming.tasks ?? []).map((task) => ({ ...task, id: nextId() })),
+        });
+        incomingTaskListMap.set(incoming.id, id);
+      } else {
+        const current = taskLists[i]!;
+        taskLists[i] = { ...current, tasks: mergeTasks(current.tasks, incoming.tasks ?? []) };
+        incomingTaskListMap.set(incoming.id, current.id);
+      }
+    }
+    next.taskLists = taskLists;
+  } else if (Array.isArray(data.tasks)) {
+    const first = s.taskLists[0];
+    if (first) {
+      next.taskLists = s.taskLists.map((list) =>
+        list.id === first.id ? { ...list, tasks: mergeTasks(list.tasks, data.tasks!) } : list,
+      );
+    }
   }
 
   if (Array.isArray(data.habits)) {
@@ -607,7 +677,13 @@ function mergeStore(s: Store, data: Partial<Store>): Store {
     const recurring = [...s.recurring];
     for (const r of data.recurring) {
       if (!recurring.some((x) => x.text.trim() === r.text.trim())) {
-        recurring.push({ ...r, id: nextId() });
+        recurring.push({
+          ...r,
+          id: nextId(),
+          listId:
+            (r.listId ? incomingTaskListMap.get(r.listId) : undefined) ??
+            next.taskLists[0]!.id,
+        });
       }
     }
     next.recurring = recurring;
@@ -623,6 +699,7 @@ export default function App() {
   const [store, setStore] = useState<Store>(DEFAULT_STORE);
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState<ListKey>("today");
+  const [activeTaskListId, setActiveTaskListId] = useState(MAIN_TASK_LIST_ID);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [openFolder, setOpenFolder] = useState<string | null>(null);
@@ -655,10 +732,12 @@ export default function App() {
   const importRef = useRef<HTMLInputElement>(null);
 
   const sendPackage = async (sel: Record<ExportKey, boolean> = exportSel) => {
-    const payload: Record<string, unknown> = { app: "maple", version: 1, exportedAt: Date.now() };
+    const payload: Record<string, unknown> = { app: "maple", version: 2, exportedAt: Date.now() };
     if (sel.habits) payload['habits'] = store.habits;
     if (sel.tasks) {
-      payload['tasks'] = store.tasks;
+      payload['taskLists'] = store.taskLists;
+      // Compatibilidad con versiones de Maple anteriores a las listas por pestañas.
+      payload['tasks'] = store.taskLists[0]?.tasks ?? [];
       payload['recurring'] = store.recurring;
     }
     if (sel.exercises) payload['folders'] = store.folders;
@@ -707,7 +786,7 @@ export default function App() {
 
   const importPackage = async (file: File) => {
     try {
-      const data = JSON.parse(await file.text()) as Partial<Store>;
+      const data = JSON.parse(await file.text()) as Partial<Store> & { tasks?: Item[] };
       setStore((s) => mergeStore(s, data));
       setTransferMsg("Paquete sincronizado.");
       setTransferOpen(false);
@@ -739,6 +818,12 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
   }, [store, ready]);
 
+  useEffect(() => {
+    if (!store.taskLists.some((list) => list.id === activeTaskListId)) {
+      setActiveTaskListId(store.taskLists[0]?.id ?? MAIN_TASK_LIST_ID);
+    }
+  }, [activeTaskListId, store.taskLists]);
+
   // Revisa cada minuto por si la app queda abierta pasada la 2 am o cambia la hora.
   useEffect(() => {
     if (!ready) return;
@@ -764,6 +849,9 @@ export default function App() {
   const meta = store.metas.find((m) => m.id === openMeta) ?? null;
   const project =
     store.projects.find((p) => p.id === openProject && (!meta || p.metaId === meta.id)) ?? null;
+  const activeTaskList =
+    store.taskLists.find((list) => list.id === activeTaskListId) ?? store.taskLists[0] ?? null;
+  const activeTasks = activeTaskList?.tasks ?? [];
 
   const inFolder = tab === "exercises" && folder !== null;
   const inFolderList = tab === "exercises" && folder === null;
@@ -780,26 +868,75 @@ export default function App() {
     return Array.from(set).sort((a, b) => a.localeCompare(b, "es"));
   }, [store.notebooks]);
 
-  const toggleTask = useCallback(
-    (id: string) =>
+  const updateTaskList = useCallback(
+    (id: string, fn: (list: TaskList) => TaskList) =>
       setStore((s) => ({
         ...s,
-        tasks: s.tasks.map((i) => (i.id === id ? { ...i, done: !i.done } : i)),
+        taskLists: s.taskLists.map((list) => (list.id === id ? fn(list) : list)),
       })),
     [],
+  );
+
+  const toggleTask = useCallback(
+    (id: string) => {
+      if (!activeTaskList) return;
+      updateTaskList(activeTaskList.id, (list) => ({
+        ...list,
+        tasks: list.tasks.map((item) =>
+          item.id === id ? { ...item, done: !item.done } : item,
+        ),
+      }));
+    },
+    [activeTaskList, updateTaskList],
   );
 
   const removeTask = useCallback(
     (id: string) =>
       setStore((s) => {
-        const item = s.tasks.find((i) => i.id === id);
+        const list = s.taskLists.find((item) => item.id === activeTaskListId);
+        const task = list?.tasks.find((item) => item.id === id);
         return {
           ...s,
-          tasks: s.tasks.filter((i) => i.id !== id),
-          recurring: item?.rid ? s.recurring.filter((r) => r.id !== item.rid) : s.recurring,
+          taskLists: s.taskLists.map((item) =>
+            item.id === activeTaskListId
+              ? { ...item, tasks: item.tasks.filter((taskItem) => taskItem.id !== id) }
+              : item,
+          ),
+          recurring: task?.rid ? s.recurring.filter((r) => r.id !== task.rid) : s.recurring,
         };
       }),
-    [],
+    [activeTaskListId],
+  );
+
+  const addTaskList = useCallback(() => {
+    const id = nextId();
+    setStore((s) => {
+      const used = new Set(s.taskLists.map((list) => list.name.trim().toLocaleLowerCase("es")));
+      let number = 1;
+      while (used.has(`lista ${number}`)) number += 1;
+      return {
+        ...s,
+        taskLists: [...s.taskLists, { id, name: `Lista ${number}`, tasks: [] }],
+      };
+    });
+    setActiveTaskListId(id);
+  }, []);
+
+  const removeTaskList = useCallback(
+    (id: string) => {
+      if (store.taskLists.length <= 1) return;
+      const index = store.taskLists.findIndex((list) => list.id === id);
+      const remaining = store.taskLists.filter((list) => list.id !== id);
+      setStore((s) => ({
+        ...s,
+        taskLists: s.taskLists.filter((list) => list.id !== id),
+        recurring: s.recurring.filter((rule) => rule.listId !== id),
+      }));
+      if (activeTaskListId === id) {
+        setActiveTaskListId(remaining[Math.max(0, index - 1)]?.id ?? remaining[0]!.id);
+      }
+    },
+    [activeTaskListId, store.taskLists],
   );
 
 
@@ -901,6 +1038,7 @@ export default function App() {
       const rule: Rule = {
         id: nextId(),
         text,
+        listId: activeTaskList?.id ?? store.taskLists[0]!.id,
         freq: recurFreq,
         weekdays: recurWeek,
         monthdays: recurMonth,
@@ -913,8 +1051,11 @@ export default function App() {
       setRecurWeek([]);
       setRecurMonth([]);
       setRecurYear([]);
-    } else {
-      setStore((s) => ({ ...s, tasks: [...s.tasks, { id: nextId(), text, done: false }] }));
+    } else if (tab === "tasks" && activeTaskList) {
+      updateTaskList(activeTaskList.id, (list) => ({
+        ...list,
+        tasks: [...list.tasks, { id: nextId(), text, done: false }],
+      }));
     }
     setDraft("");
     inputRef.current?.focus();
@@ -937,6 +1078,8 @@ export default function App() {
     recurWeek,
     recurMonth,
     recurYear,
+    activeTaskList,
+    updateTaskList,
   ]);
 
   const tabs = useMemo(
@@ -1162,6 +1305,38 @@ export default function App() {
             </label>
           ))}
 
+          {tab === "tasks" && (
+            <div className="!mt-4 space-y-2 border-t border-border pt-3">
+              <p className="text-[13px] uppercase tracking-widest text-muted-foreground">
+                Listas de tareas
+              </p>
+              {store.taskLists.map((list) => (
+                <div key={list.id} className="flex items-center gap-2">
+                  <Check size={16} strokeWidth={1.75} className="text-muted-foreground" />
+                  <input
+                    value={list.name}
+                    onFocus={() => setActiveTaskListId(list.id)}
+                    onChange={(e) =>
+                      updateTaskList(list.id, (item) => ({ ...item, name: e.target.value }))
+                    }
+                    className="w-full bg-transparent py-1 text-[16px] outline-none"
+                    aria-label="Nombre de la lista"
+                  />
+                  {store.taskLists.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeTaskList(list.id)}
+                      aria-label={`Eliminar ${list.name || "lista"}`}
+                      className="text-muted-foreground"
+                    >
+                      <Trash2 size={16} strokeWidth={1.75} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="!mt-4 border-t border-border pt-3">
             <button
               type="button"
@@ -1226,7 +1401,7 @@ export default function App() {
             <ChevronLeft size={26} strokeWidth={2} />
           </button>
         )}
-        <h1 className="text-[14px] tracking-[0.15em] text-muted-foreground">
+        <h1 className="flex-1 text-[14px] tracking-[0.15em] text-muted-foreground">
           {inFolder && folder
             ? folder.name
             : inHabit && habit
@@ -1246,7 +1421,38 @@ export default function App() {
                           : store.labels[tab]}
         </h1>
 
+        {tab === "tasks" && (
+          <button
+            type="button"
+            onClick={addTaskList}
+            aria-label="Agregar lista de tareas"
+            className="flex size-9 shrink-0 items-center justify-center rounded-md border border-foreground active:scale-95"
+          >
+            <Plus size={20} strokeWidth={2} />
+          </button>
+        )}
+
       </div>
+
+      {(tab === "tasks" || tab === "today") && (
+        <div className="mt-2 flex gap-1 overflow-x-auto pb-1">
+          {store.taskLists.map((list) => (
+            <button
+              key={list.id}
+              type="button"
+              onClick={() => setActiveTaskListId(list.id)}
+              aria-pressed={activeTaskList?.id === list.id}
+              className={`shrink-0 rounded-md border px-3 py-2 text-[13px] font-medium tracking-wide ${
+                activeTaskList?.id === list.id
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border text-muted-foreground"
+              }`}
+            >
+              {list.name.trim() || "Sin nombre"}
+            </button>
+          ))}
+        </div>
+      )}
 
 
       {tab === "today" ? (
@@ -1256,7 +1462,7 @@ export default function App() {
               {store.labels.tasks}
             </p>
             <ul className="divide-y divide-border">
-              {store.tasks
+              {activeTasks
                 .filter((t) => !t.done)
                 .map((t) => (
                   <li key={t.id} className="flex items-center gap-3 py-2">
@@ -1269,7 +1475,7 @@ export default function App() {
                     <span className="flex-1 text-[17px] leading-snug">{t.text}</span>
                   </li>
                 ))}
-              {store.tasks.every((t) => t.done) && (
+              {activeTasks.every((t) => t.done) && (
                 <li className="py-2 text-[15px] text-muted-foreground">Nada pendiente.</li>
               )}
             </ul>
@@ -2028,7 +2234,7 @@ export default function App() {
         </div>
       ) : (
         <ul className="mt-2 flex-1 divide-y divide-border">
-          {store.tasks.map((item, ti) => (
+          {activeTasks.map((item, ti) => (
             <li key={item.id} className="flex items-center gap-3 py-3">
               <button
                 type="button"
@@ -2044,10 +2250,11 @@ export default function App() {
                 <input
                   value={item.text}
                   onChange={(e) =>
-                    setStore((s) => ({
-                      ...s,
-                      tasks: s.tasks.map((x) =>
-                        x.id === item.id ? { ...x, text: e.target.value } : x,
+                    activeTaskList &&
+                    updateTaskList(activeTaskList.id, (list) => ({
+                      ...list,
+                      tasks: list.tasks.map((taskItem) =>
+                        taskItem.id === item.id ? { ...taskItem, text: e.target.value } : taskItem,
                       ),
                     }))
                   }
@@ -2067,9 +2274,13 @@ export default function App() {
               {editing && (
                 <Reorder
                   first={ti === 0}
-                  last={ti === store.tasks.length - 1}
+                  last={ti === activeTasks.length - 1}
                   onMove={(dir) =>
-                    setStore((s) => ({ ...s, tasks: move(s.tasks, ti, ti + dir) }))
+                    activeTaskList &&
+                    updateTaskList(activeTaskList.id, (list) => ({
+                      ...list,
+                      tasks: move(list.tasks, ti, ti + dir),
+                    }))
                   }
                 />
               )}
@@ -2085,7 +2296,7 @@ export default function App() {
               )}
             </li>
           ))}
-          {ready && store.tasks.length === 0 && (
+          {ready && activeTasks.length === 0 && (
             <li className="py-6 text-[16px] text-muted-foreground">Lista vacía.</li>
           )}
         </ul>
