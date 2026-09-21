@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { BookMarked, ChevronDown, ChevronLeft, ChevronUp, Download, Plus, Save, Tag, Trash2 } from "lucide-react";
-import type { Notebook, ReaderSettings } from "@/lib/library-types";
+import type { Notebook, ReaderSettings } from "@/components/library-types";
 
 type Props = {
   notebook: Notebook;
