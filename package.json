@@ -1,7 +1,7 @@
 {
-  "name": "maple-v8-offline",
+  "name": "maple-v9-2-offline",
   "private": true,
-  "version": "8.0.0",
+  "version": "9.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
